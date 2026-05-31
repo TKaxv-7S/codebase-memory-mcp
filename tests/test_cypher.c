@@ -745,6 +745,31 @@ TEST(cypher_exec_distinct) {
     PASS();
 }
 
+/* issue #238: WITH DISTINCT must deduplicate projected rows (previously the
+ * DISTINCT keyword on WITH was parsed but silently ignored). */
+TEST(cypher_exec_with_distinct_issue238) {
+    cbm_store_t *s = setup_cypher_store();
+    cbm_cypher_result_t r = {0};
+
+    /* 4 Function nodes all share label "Function" → WITH DISTINCT collapses to
+     * one row; without dedup this returned 4. */
+    int rc = cbm_cypher_execute(s, "MATCH (f:Function) WITH DISTINCT f.label AS lbl RETURN lbl",
+                                "test", 0, &r);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(r.row_count, 1);
+    cbm_cypher_result_free(&r);
+
+    /* Control: without DISTINCT, all 4 rows flow through. */
+    cbm_cypher_result_t r2 = {0};
+    rc = cbm_cypher_execute(s, "MATCH (f:Function) WITH f.label AS lbl RETURN lbl", "test", 0, &r2);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(r2.row_count, 4);
+    cbm_cypher_result_free(&r2);
+
+    cbm_store_close(s);
+    PASS();
+}
+
 /* --- Ported from cypher_test.go: TestExecuteInlinePropertyFilter --- */
 TEST(cypher_exec_inline_props) {
     cbm_store_t *s = setup_cypher_store();
@@ -2216,6 +2241,7 @@ SUITE(cypher) {
     RUN_TEST(cypher_exec_where_numeric);
     /* Go test ports */
     RUN_TEST(cypher_exec_distinct);
+    RUN_TEST(cypher_exec_with_distinct_issue238);
     RUN_TEST(cypher_exec_inline_props);
     RUN_TEST(cypher_parse_where_starts_with);
     RUN_TEST(cypher_parse_where_contains);

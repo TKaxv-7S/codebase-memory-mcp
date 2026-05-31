@@ -2930,6 +2930,54 @@ static void filter_bindings_where(const cbm_where_clause_t *where, binding_t *vb
     *vcount = kept;
 }
 
+/* Build a key from a projected vbinding's value tuple (all WITH output items),
+ * used to detect duplicate rows for WITH DISTINCT (#238). */
+static void with_proj_key(cbm_return_clause_t *wc, binding_t *b, char *key, size_t key_sz) {
+    int kl = 0;
+    key[0] = '\0';
+    char name_buf[CBM_SZ_256];
+    for (int ci = 0; ci < wc->count; ci++) {
+        const char *alias = resolve_item_alias(&wc->items[ci], name_buf, sizeof(name_buf));
+        const char *v = binding_get_virtual(b, alias, NULL);
+        int w = snprintf(key + kl, (kl < (int)key_sz) ? key_sz - (size_t)kl : 0, "%s|", v ? v : "");
+        if (w > 0) {
+            kl += w;
+        }
+        if (kl >= (int)key_sz) {
+            kl = (int)key_sz - SKIP_ONE;
+            break;
+        }
+    }
+}
+
+/* Apply WITH DISTINCT: drop projected rows whose value tuple duplicates an
+ * earlier one, keeping first occurrence (#238 — previously silently ignored). */
+static void with_apply_distinct(cbm_return_clause_t *wc, binding_t *vbindings, int *vcount) {
+    int kept = 0;
+    for (int i = 0; i < *vcount; i++) {
+        char key[CBM_SZ_1K];
+        with_proj_key(wc, &vbindings[i], key, sizeof(key));
+        bool dup = false;
+        for (int j = 0; j < kept; j++) {
+            char pkey[CBM_SZ_1K];
+            with_proj_key(wc, &vbindings[j], pkey, sizeof(pkey));
+            if (strcmp(key, pkey) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            binding_free(&vbindings[i]);
+        } else {
+            if (kept != i) {
+                vbindings[kept] = vbindings[i];
+            }
+            kept++;
+        }
+    }
+    *vcount = kept;
+}
+
 static void execute_with_clause(cbm_query_t *q, binding_t **bindings_ptr, int *bind_count_ptr) {
     cbm_return_clause_t *wc = q->with_clause;
     if (!wc) {
@@ -2953,6 +3001,12 @@ static void execute_with_clause(cbm_query_t *q, binding_t **bindings_ptr, int *b
         execute_with_aggregate(wc, bindings, bind_count, &vbindings, &vcount);
     } else {
         execute_with_simple(wc, bindings, bind_count, vbindings, &vcount);
+    }
+
+    /* WITH DISTINCT: dedup projected rows (no-op for aggregation, which already
+     * collapses to one row per group). */
+    if (wc->distinct) {
+        with_apply_distinct(wc, vbindings, &vcount);
     }
 
     with_sort_skip_limit(wc, vbindings, &vcount);

@@ -165,6 +165,17 @@ if [ "$FOLDER_COUNT" -lt 2 ]; then
 fi
 echo "OK: $FOLDER_COUNT Folder nodes (init.py didn't clobber them)"
 
+# 3d-cypher: query_graph Cypher capabilities
+# #238 WITH DISTINCT — all functions share label "Function" → collapses to 1 row.
+CYPHER_WD=$(cli query_graph "{\"project\":\"$PROJECT\",\"query\":\"MATCH (f:Function) WITH DISTINCT f.label AS lbl RETURN lbl\"}")
+WD_ROWS=$(echo "$CYPHER_WD" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(len(d.get('rows',[])))" 2>/dev/null || echo "0")
+if [ "$WD_ROWS" -lt 1 ]; then
+  echo "FAIL: query_graph WITH DISTINCT returned 0 rows"
+  echo "$CYPHER_WD"
+  exit 1
+fi
+echo "OK: query_graph WITH DISTINCT returned $WD_ROWS row(s)"
+
 # 3e: delete_project cleanup
 cli delete_project "{\"project\":\"$PROJECT\"}" > /dev/null
 

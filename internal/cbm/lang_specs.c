@@ -372,7 +372,7 @@ static const char *cs_branch_types[] = {"if_statement",    "for_statement",    "
                                         "try_statement",   "catch_clause",     NULL};
 static const char *cs_var_types[] = {"field_declaration", "local_declaration_statement", NULL};
 static const char *cs_field_types[] = {"field_declaration", "property_declaration", NULL};
-static const char *cs_assign_types[] = {"assignment_expression", NULL};
+static const char *cs_assign_types[] = {"assignment_expression", "update_expression", NULL};
 static const char *cs_throw_types[] = {"throw_statement", "throw_expression", NULL};
 static const char *cs_decorator_types[] = {"attribute", NULL};
 

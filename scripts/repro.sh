@@ -38,6 +38,13 @@ print_env "repro.sh"
 verify_compiler "$CC"
 
 OUT="$ROOT/repro-out.txt"
+# A RED reproduction fails its assertion and returns EARLY — before any cleanup —
+# so LeakSanitizer would flag benign harness leaks on every red store-level test
+# and abort. The board's signal is the FAIL rows, not leak-cleanliness (the leak
+# BUG #581 gets a dedicated RSS-growth test, not LSan). Disable leak detection
+# only; ASan's real checks (use-after-free, overflow) stay ON.
+export ASAN_OPTIONS="detect_leaks=0${ASAN_OPTIONS:+:$ASAN_OPTIONS}"
+
 # test-repro both builds and runs the runner; tolerate its non-zero (red) exit.
 set +e
 $ARCH_PREFIX make -j"$NPROC" -f Makefile.cbm test-repro $MAKE_ARGS 2>&1 | tee "$OUT"

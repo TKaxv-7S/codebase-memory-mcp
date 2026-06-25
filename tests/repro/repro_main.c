@@ -34,6 +34,11 @@ extern void suite_repro_issue521(void);
 extern void suite_repro_issue382(void);
 
 int main(void) {
+    /* Unbuffered: a reproduction may crash/_exit (or a sanitizer may _exit on a
+     * leak) before stdio flushes — keep every printed line so the summary and the
+     * RED rows always reach the board even on an abnormal exit. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     printf("\n");
     printf("════════════════════════════════════════════════════════════\n");
     printf("  CUMULATIVE BUG-REPRODUCTION SUITE\n");

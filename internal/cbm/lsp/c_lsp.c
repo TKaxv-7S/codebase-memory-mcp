@@ -2567,6 +2567,26 @@ const CBMRegisteredFunc *c_lookup_member(CLSPContext *ctx, const char *type_qn,
     return c_lookup_member_depth(ctx, type_qn, member_name, 0);
 }
 
+// True if any BASE class of type_qn (not type_qn itself) declares member_name —
+// i.e. a method found directly on type_qn is an OVERRIDE of an inherited method.
+// This mirrors the existing virtual-dispatch notion (a derived override of a base
+// method) for the case where the override is resolved directly on the derived
+// type rather than through the base.
+static bool c_base_declares_member(CLSPContext *ctx, const char *type_qn, const char *member_name) {
+    const CBMRegisteredType *rt = cbm_registry_lookup_type(ctx->registry, type_qn);
+    if (!rt && ctx->module_qn) {
+        rt = cbm_registry_lookup_type(
+            ctx->registry, cbm_arena_sprintf(ctx->arena, "%s.%s", ctx->module_qn, type_qn));
+    }
+    if (!rt || !rt->embedded_types)
+        return false;
+    for (int i = 0; rt->embedded_types[i]; i++) {
+        if (c_lookup_member(ctx, rt->embedded_types[i], member_name))
+            return true;
+    }
+    return false;
+}
+
 // Field type lookup
 static const CBMType *c_lookup_field_type(CLSPContext *ctx, const char *type_qn,
                                           const char *field_name, int depth) {
@@ -3413,6 +3433,11 @@ static void c_resolve_calls_in_node_inner(CLSPContext *ctx, TSNode node) {
                                     } else {
                                         strategy = "lsp_base_dispatch";
                                     }
+                                } else if (c_base_declares_member(ctx, type_qn, field_name)) {
+                                    // Method resolved directly on type_qn but also
+                                    // declared in a base → a derived override of an
+                                    // inherited (virtual) method → polymorphic dispatch.
+                                    strategy = "lsp_virtual_dispatch";
                                 }
                                 // Check if through smart pointer
                                 if (is_arrow && obj_type->kind == CBM_TYPE_TEMPLATE &&

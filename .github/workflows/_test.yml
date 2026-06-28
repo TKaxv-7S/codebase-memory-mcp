@@ -110,6 +110,12 @@ jobs:
 
       - name: Test
         shell: msys2 {0}
-        run: scripts/test.sh CC=clang CXX=clang++
+        # AddressSanitizer is unavailable on native ARM64 Windows (LLVM ships no
+        # libclang_rt.asan for aarch64-w64-windows-gnu) and cannot intercept the
+        # system DLLs under x86-64 emulation either, so windows-11-arm runs the
+        # native ARM64 build with SANITIZE= (no sanitizer) — still a real
+        # functional gate. ASan/UBSan coverage comes from the other 9 legs,
+        # including native-ARM Linux/macOS. x86-64 Windows keeps full sanitizers.
+        run: scripts/test.sh CC=clang CXX=clang++ ${{ matrix.os == 'windows-11-arm' && 'SANITIZE=' || '' }}
         env:
           CBM_SKIP_PERF: ${{ inputs.skip_perf && '1' || '' }}

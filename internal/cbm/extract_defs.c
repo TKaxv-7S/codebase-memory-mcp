@@ -2875,7 +2875,7 @@ static void extract_func_def(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec 
         return;
     }
 
-    char *name = cbm_node_text(a, name_node, ctx->source);
+    char *name = cbm_func_name_node_text(a, name_node, ctx->source);
     if (!name || !name[0] || strcmp(name, "function") == 0) {
         return;
     }
@@ -3867,7 +3867,7 @@ static void push_method_def(CBMExtractCtx *ctx, TSNode child, const char *class_
                             const CBMLangSpec *spec, TSNode name_node) {
     CBMArena *a = ctx->arena;
 
-    char *name = cbm_node_text(a, name_node, ctx->source);
+    char *name = cbm_func_name_node_text(a, name_node, ctx->source);
     if (!name || !name[0]) {
         return;
     }

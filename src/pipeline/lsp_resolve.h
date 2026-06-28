@@ -105,10 +105,12 @@ static inline const CBMResolvedCall *cbm_pipeline_find_lsp_resolution(
          * calls (bare callee_name) are unaffected. */
         const char *call_short = cbm_lsp_bare_segment(call->callee_name);
         if (strcmp(short_name, call_short) != 0) {
-            /* Data-flow resolution: a function-pointer / DLL call's textual
-             * callee is the pointer name (`fp`), which the LSP resolved to a
-             * differently-named target and stashed in `reason`. Match the call
-             * site on that original name, gated to those strategies so `reason`
+            /* Indirect/implicit resolution: the textual callee differs from the
+             * resolved callee_qn's short name. A function-pointer / DLL call's
+             * callee is the pointer name (`fp`); a C++ destructor's only textual
+             * anchor is the deleted operand (`p`, vs. the `T.~T` callee QN). In
+             * both the LSP stashed the original textual name in `reason`. Match
+             * the call site on that name, gated to those strategies so `reason`
              * is never misread as an unresolved-call diagnostic. */
             if (!(rc->reason && rc->strategy &&
                   (strcmp(rc->strategy, "lsp_func_ptr") == 0 ||
@@ -116,6 +118,7 @@ static inline const CBMResolvedCall *cbm_pipeline_find_lsp_resolution(
                    strcmp(rc->strategy, "lsp_method_ref_ctor") == 0 ||
                    strcmp(rc->strategy, "lsp_method_ref_ctor_synth") == 0 ||
                    strcmp(rc->strategy, "lsp_dict_dispatch") == 0 ||
+                   strcmp(rc->strategy, "lsp_destructor") == 0 ||
                    strcmp(rc->strategy, "php_method_dynamic") == 0) &&
                   strcmp(cbm_lsp_bare_segment(rc->reason), call_short) == 0)) {
                 continue;

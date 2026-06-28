@@ -3801,7 +3801,12 @@ static void c_resolve_calls_in_node_inner(CLSPContext *ctx, TSNode node) {
                 const char *short_name = strrchr(type_qn, '.');
                 short_name = short_name ? short_name + 1 : type_qn;
                 const char *dtor_qn = cbm_arena_sprintf(ctx->arena, "%s.~%s", type_qn, short_name);
-                c_emit_resolved_call(ctx, dtor_qn, "lsp_destructor", 0.90f);
+                // The destructor callee QN (`T.~T`) is not textually available
+                // from `delete p` — the call walk can only synthesize a call to
+                // the operand text. Stash that operand text in `reason` so the
+                // pipeline join binds the synthesized call via the reason gate.
+                c_emit_resolved_call_orig(ctx, dtor_qn, c_node_text(ctx, operand), "lsp_destructor",
+                                          0.90f);
             }
         }
     }
@@ -3973,6 +3978,13 @@ static void c_resolve_calls_in_node_inner(CLSPContext *ctx, TSNode node) {
          strcmp(kind, "do_statement") == 0)) {
         TSNode cond = ts_node_child_by_field_name(node, "condition", 9);
         if (!ts_node_is_null(cond)) {
+            // The `condition` field is a `condition_clause` wrapping the `( expr )`;
+            // unwrap it to the inner expression so its type evaluates (a clause
+            // node has no type, so `if (obj)` would never resolve obj's type).
+            if (strcmp(ts_node_type(cond), "condition_clause") == 0 &&
+                ts_node_named_child_count(cond) == 1) {
+                cond = ts_node_named_child(cond, 0);
+            }
             // If condition is a single expression of a custom type with operator bool
             const CBMType *cond_type = c_eval_expr_type(ctx, cond);
             const CBMType *base = c_simplify_type(ctx, cond_type, false);

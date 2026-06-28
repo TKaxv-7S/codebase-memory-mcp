@@ -801,6 +801,28 @@ TSNode cbm_resolve_c_declarator_name_node(TSNode func_node) {
     return null_node;
 }
 
+// Convert a resolved function/method name node to its name string. Most nodes
+// map directly to their text, but a C++ conversion-operator's `operator_cast`
+// node spans the full "operator bool() const" — this grammar folds the parameter
+// list and cv-qualifiers into the node. The method's name is only the
+// "operator <type>" prefix, so truncate at the first '(' and trim trailing
+// space. Without this the conversion operator is indexed as "operator bool()
+// const", and a member lookup for "operator bool" (the implicit call in
+// `if (obj)`) misses.
+char *cbm_func_name_node_text(CBMArena *a, TSNode name_node, const char *source) {
+    char *text = cbm_node_text(a, name_node, source);
+    if (text && strcmp(ts_node_type(name_node), "operator_cast") == 0) {
+        char *paren = strchr(text, '(');
+        if (paren) {
+            while (paren > text && (paren[-1] == ' ' || paren[-1] == '\t')) {
+                paren--;
+            }
+            *paren = '\0';
+        }
+    }
+    return text;
+}
+
 static const char *func_node_name(CBMArena *a, TSNode func_node, const char *source,
                                   CBMLanguage lang) {
     // Wolfram: set_delayed_top/set_top/set_delayed/set — LHS is apply(user_symbol("f"), ...)
@@ -839,7 +861,7 @@ static const char *func_node_name(CBMArena *a, TSNode func_node, const char *sou
     if (strcmp(ts_node_type(func_node), "function_definition") == 0) {
         TSNode dn = cbm_resolve_c_declarator_name_node(func_node);
         if (!ts_node_is_null(dn)) {
-            return cbm_node_text(a, dn, source);
+            return cbm_func_name_node_text(a, dn, source);
         }
     }
     return NULL;

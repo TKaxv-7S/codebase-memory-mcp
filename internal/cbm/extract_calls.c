@@ -1739,6 +1739,73 @@ static void extract_cpp_operator_call(CBMExtractCtx *ctx, TSNode node, const cha
     }
 }
 
+// C++ implicit calls that produce no textual call node: the destructor
+// (`delete p`), the copy/move constructor (`T a = b;` copy-init), and the
+// conversion operator (`if (obj)` where obj has `operator bool`). The c-LSP
+// resolves each to the corresponding member but there is no call site to join
+// to (callable=0). Synthesize a textual call sourced to the enclosing function
+// so the lsp_{destructor,copy_constructor,conversion} resolution binds.
+//
+//   - destructor: the callee QN embeds the type (`T.~T`), which is not textually
+//     available from `delete p`, so it joins via the reason gate — c_lsp stashes
+//     the operand text in `reason` and the synthesized callee is that same text.
+//   - copy constructor: the callee short-name is the constructed type (`T`),
+//     which IS textually present as the declaration's type — join by short-name.
+//   - conversion: the callee short-name is the type-independent `operator bool`.
+//
+// Spurious synthesis (a condition/operand that has no such member) resolves to
+// nothing and is dropped, so no extra edge is produced.
+static void extract_cpp_implicit_calls(CBMExtractCtx *ctx, TSNode node, const char *kind,
+                                       const char *enclosing_func_qn) {
+    const char *callee = NULL;
+    if (strcmp(kind, "delete_expression") == 0) {
+        TSNode operand = ts_node_child_by_field_name(node, TS_FIELD("argument"));
+        if (ts_node_is_null(operand) && ts_node_named_child_count(node) > 0) {
+            operand = ts_node_named_child(node, 0);
+        }
+        if (!ts_node_is_null(operand)) {
+            callee = cbm_node_text(ctx->arena, operand, ctx->source);
+        }
+    } else if (strcmp(kind, "if_statement") == 0 || strcmp(kind, "while_statement") == 0 ||
+               strcmp(kind, "do_statement") == 0) {
+        // `if (obj)` invokes obj's `operator bool`. Only a lone-identifier
+        // condition triggers it; comparisons/logical exprs evaluate to bool.
+        TSNode cond = ts_node_child_by_field_name(node, TS_FIELD("condition"));
+        if (!ts_node_is_null(cond)) {
+            TSNode inner = cond;
+            if (strcmp(ts_node_type(cond), "condition_clause") == 0 &&
+                ts_node_named_child_count(cond) == 1) {
+                inner = ts_node_named_child(cond, 0);
+            }
+            if (strcmp(ts_node_type(inner), "identifier") == 0) {
+                callee = "operator bool";
+            }
+        }
+    } else if (strcmp(kind, "declaration") == 0) {
+        // `T a = b;` — copy-init from an identifier invokes T's copy constructor.
+        TSNode type = ts_node_child_by_field_name(node, TS_FIELD("type"));
+        TSNode decl = ts_node_child_by_field_name(node, TS_FIELD("declarator"));
+        if (!ts_node_is_null(type) && !ts_node_is_null(decl) &&
+            strcmp(ts_node_type(decl), "init_declarator") == 0) {
+            TSNode value = ts_node_child_by_field_name(decl, TS_FIELD("value"));
+            if (!ts_node_is_null(value) && strcmp(ts_node_type(value), "identifier") == 0) {
+                char *tn = cbm_node_text(ctx->arena, type, ctx->source);
+                if (tn) {
+                    const char *colon = strrchr(tn, ':');
+                    callee = colon ? colon + 1 : tn;
+                }
+            }
+        }
+    }
+    if (callee && callee[0]) {
+        CBMCall call = {0};
+        call.callee_name = callee;
+        call.enclosing_func_qn = enclosing_func_qn;
+        call.start_line = (int)ts_node_start_point(node).row + TS_LINE_OFFSET;
+        cbm_calls_push(&ctx->result->calls, ctx->arena, call);
+    }
+}
+
 static void extract_kotlin_desugared_calls(CBMExtractCtx *ctx, TSNode node, const char *kind,
                                            const char *enclosing_func_qn) {
     if (strcmp(kind, "property_declaration") == 0) {
@@ -1871,5 +1938,6 @@ void handle_calls(CBMExtractCtx *ctx, TSNode node, const CBMLangSpec *spec, Walk
 
     if (ctx->language == CBM_LANG_CPP || ctx->language == CBM_LANG_CUDA) {
         extract_cpp_operator_call(ctx, node, ts_node_type(node), state->enclosing_func_qn);
+        extract_cpp_implicit_calls(ctx, node, ts_node_type(node), state->enclosing_func_qn);
     }
 }

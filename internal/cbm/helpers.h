@@ -50,6 +50,12 @@ const char *cbm_enclosing_func_qn_cached(CBMExtractCtx *ctx, TSNode node);
 // enclosing-function attribution — drift between private copies caused #438.
 TSNode cbm_resolve_c_declarator_name_node(TSNode func_node);
 
+// Convert a resolved function/method name node to its name string, normalizing a
+// C++ conversion-operator's `operator_cast` node (which spans the full
+// "operator bool() const") down to "operator bool". Shared by the defs and
+// unified extractors so the def name and call-scope QN agree.
+char *cbm_func_name_node_text(CBMArena *a, TSNode name_node, const char *source);
+
 // Resolve a function/method definition node's NAME node across all ~130 grammars
 // (generic `name` field, arrow→declarator, C/C++ declarator chain, plus the many
 // per-language quirks: Fortran subroutine, SCSS mixin, SQL create_function, R,

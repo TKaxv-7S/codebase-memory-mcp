@@ -5706,10 +5706,11 @@ static void *autoindex_thread(void *arg) {
         if (resp) {
             free(resp);
             cbm_log_info("autoindex.done", "project", srv->session_project, "mode", "supervised");
-            /* Register with watcher for ongoing change detection */
-            if (srv->watcher) {
-                cbm_watcher_watch(srv->watcher, srv->session_project, srv->session_root);
-            }
+            /* Register with watcher for ongoing change detection — gated on
+             * auto_watch (#849), same as the in-process branch below. A bare
+             * `if (srv->watcher)` would register even when the user set
+             * `config set auto_watch false`, since srv->watcher is always set. */
+            register_watcher_if_enabled(srv);
             return NULL;
         }
         /* resp == NULL → spawn-failure degrade → fall through to in-process. */

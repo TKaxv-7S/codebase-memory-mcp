@@ -114,6 +114,19 @@ jobs:
             cp "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}.tar.gz" \
                "/tmp/smoke-server/codebase-memory-mcp-${OS}-${ARCH}.tar.gz"
           fi
+          # The linux binary self-updates from the fully-static "-portable" asset
+          # (build_update_url in src/cli/cli.c appends -portable on linux; _build.yml's
+          # build-linux-portable job ships it), so the smoke server must serve that name
+          # too -- otherwise `update` 404s and Phase 14 fails. Mirror the tarball(s) under
+          # the -portable name on linux only.
+          if [ "$OS" = "linux" ]; then
+            cp "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}.tar.gz" \
+               "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}-portable.tar.gz"
+            if [ -n "$SUFFIX" ]; then
+              cp "/tmp/smoke-server/codebase-memory-mcp${SUFFIX}-${OS}-${ARCH}-portable.tar.gz" \
+                 "/tmp/smoke-server/codebase-memory-mcp-${OS}-${ARCH}-portable.tar.gz"
+            fi
+          fi
           cd /tmp/smoke-server
           sha256sum *.tar.gz > checksums.txt 2>/dev/null || shasum -a 256 *.tar.gz > checksums.txt
           python3 -m http.server 18080 -d /tmp/smoke-server &

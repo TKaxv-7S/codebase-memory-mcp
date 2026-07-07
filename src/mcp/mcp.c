@@ -4959,6 +4959,14 @@ static bool write_scoped_filelist(cbm_mcp_server_t *srv, const char *project, co
     int written = 0;
     if (fl) {
         for (int fi = 0; fi < indexed_count; fi++) {
+            /* A source path never legitimately contains a newline or carriage
+             * return. Those bytes are exactly the record separator on the
+             * Windows filelist (and would split naive line readers elsewhere),
+             * so a crafted indexed path with an embedded newline could inject
+             * an extra entry into the scan set. Skip such paths entirely. */
+            if (strpbrk(indexed_files[fi], "\r\n") != NULL) {
+                continue;
+            }
             if (has_path_filter && path_regex) {
 #ifdef _WIN32
                 cbm_normalize_path_sep(indexed_files[fi]);

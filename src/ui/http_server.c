@@ -116,7 +116,13 @@ static void handle_ui_config(cbm_http_conn_t *c, const cbm_http_req_t *req) {
     if (cfg) {
         cbm_config_close(cfg);
     }
-    cbm_http_replyf(c, 200, g_cors_json, "{\"lang\":\"%s\"}", lang_buf);
+    /* upstream_issues_url: where the missed-coverage callout (#963) sends
+     * edge-case reports. Served from the backend on purpose — the UI security
+     * audit forbids hardcoded external URLs in graph-ui source (external
+     * targets must come from an auditable backend response, same pattern as
+     * the /api/repo-info deep-links). */
+    cbm_http_replyf(c, 200, g_cors_json, "{\"lang\":\"%s\",\"upstream_issues_url\":\"%s\"}",
+                    lang_buf, "https://github.com/DeusData/codebase-memory-mcp/issues/new");
 }
 
 /* ── Server state ─────────────────────────────────────────────── */
@@ -1366,9 +1372,67 @@ static double layout_radius(const cbm_layout_result_t *r) {
     return sqrt(max_r2);
 }
 
+/* Attach the missed-graph skeleton (#963) to the primary layout doc as
+ *   "missed_graph": {"nodes":[...], "edges":[...], "offset":{x,y,z}}
+ * — the file structure of files the indexer could not fully cover, laid out
+ * as a satellite cluster beside the code galaxy (the UI renders it as a white
+ * skeleton; clicking it re-centers the camera there). The offset sits on the
+ * -Y side: linked-project satellites spread counter-clockwise from +X, so
+ * this slot collides last. Returns true when a non-empty skeleton was
+ * attached; no-op when the project has no missed files. */
+static bool attach_missed_graph(yyjson_mut_doc *mdoc, yyjson_mut_val *mroot, cbm_store_t *store,
+                                const char *project, double primary_radius) {
+    char covproj[512];
+    cbm_store_coverage_shadow_project(covproj, sizeof(covproj), project);
+    cbm_layout_result_t *ml = cbm_layout_compute(store, covproj, CBM_LAYOUT_OVERVIEW, NULL, 0, 0);
+    if (!ml) {
+        return false;
+    }
+    if (ml->node_count == 0) {
+        cbm_layout_free(ml);
+        return false;
+    }
+    double miss_radius = layout_radius(ml);
+    char *mjson = cbm_layout_to_json(ml);
+    cbm_layout_free(ml);
+    if (!mjson) {
+        return false;
+    }
+    yyjson_doc *mldoc = yyjson_read(mjson, strlen(mjson), 0);
+    free(mjson);
+    if (!mldoc) {
+        return false;
+    }
+    yyjson_mut_val *entry = yyjson_mut_obj(mdoc);
+    yyjson_val *mlroot = yyjson_doc_get_root(mldoc);
+    yyjson_val *mn = yyjson_obj_get(mlroot, "nodes");
+    yyjson_val *me = yyjson_obj_get(mlroot, "edges");
+    if (mn) {
+        yyjson_mut_obj_add_val(mdoc, entry, "nodes", yyjson_val_mut_copy(mdoc, mn));
+    }
+    if (me) {
+        yyjson_mut_obj_add_val(mdoc, entry, "edges", yyjson_val_mut_copy(mdoc, me));
+    }
+    yyjson_doc_free(mldoc);
+
+    double dist = primary_radius + miss_radius + LAYOUT_GALAXY_PAD;
+    if (dist < LAYOUT_GALAXY_SPACING) {
+        dist = LAYOUT_GALAXY_SPACING;
+    }
+    yyjson_mut_val *offset = yyjson_mut_obj(mdoc);
+    yyjson_mut_obj_add_real(mdoc, offset, "x", 0.0);
+    yyjson_mut_obj_add_real(mdoc, offset, "y", -dist);
+    yyjson_mut_obj_add_real(mdoc, offset, "z", 0.0);
+    yyjson_mut_obj_add_val(mdoc, entry, "offset", offset);
+
+    yyjson_mut_obj_add_val(mdoc, mroot, "missed_graph", entry);
+    return true;
+}
+
 static void handle_layout(cbm_http_conn_t *c, const cbm_http_req_t *req) {
     char project[256] = {0};
     char max_str[32] = {0};
+    char graph_str[32] = {0};
 
     if (!cbm_http_query_param(req->query, "project", project, (int)sizeof(project)) ||
         project[0] == '\0') {
@@ -1381,6 +1445,21 @@ static void handle_layout(cbm_http_conn_t *c, const cbm_http_req_t *req) {
         int v = atoi(max_str);
         if (v > 0)
             max_nodes = v;
+    }
+
+    /* graph=missed (#963): lay out the derived miss graph (shadow project
+     * "<name>::missed" inside the SAME db file) instead of the code graph —
+     * only files the indexer could not fully cover, as their file structure.
+     * The db file still resolves from the validated base project name. */
+    bool missed_graph = false;
+    if (cbm_http_query_param(req->query, "graph", graph_str, (int)sizeof(graph_str))) {
+        missed_graph = strcmp(graph_str, "missed") == 0;
+    }
+    char scoped_project[320];
+    if (missed_graph) {
+        cbm_store_coverage_shadow_project(scoped_project, sizeof(scoped_project), project);
+    } else {
+        snprintf(scoped_project, sizeof(scoped_project), "%s", project);
     }
 
     char db_path[1024];
@@ -1398,7 +1477,7 @@ static void handle_layout(cbm_http_conn_t *c, const cbm_http_req_t *req) {
     }
 
     cbm_layout_result_t *layout =
-        cbm_layout_compute(store, project, CBM_LAYOUT_OVERVIEW, NULL, 0, max_nodes);
+        cbm_layout_compute(store, scoped_project, CBM_LAYOUT_OVERVIEW, NULL, 0, max_nodes);
 
     /* Find linked projects from CROSS_* edges. Keep `store` open through the
      * linked-projects loop below so we can resolve target Route QNs against
@@ -1424,14 +1503,16 @@ static void handle_layout(cbm_http_conn_t *c, const cbm_http_req_t *req) {
         return;
     }
 
-    if (linked_count == 0) {
+    /* Fast path: no satellites to attach. The missed skeleton only decorates
+     * the CODE graph — a graph=missed request already IS the miss graph. */
+    if (linked_count == 0 && missed_graph) {
         cbm_store_close(store);
         cbm_http_replyf(c, 200, g_cors_json, "%s", primary_json);
         free(primary_json);
         return;
     }
 
-    /* Parse primary JSON and append linked_projects array */
+    /* Parse primary JSON and append missed_graph + linked_projects */
     yyjson_doc *pdoc = yyjson_read(primary_json, strlen(primary_json), 0);
     free(primary_json);
     if (!pdoc) {
@@ -1443,6 +1524,10 @@ static void handle_layout(cbm_http_conn_t *c, const cbm_http_req_t *req) {
     yyjson_mut_doc *mdoc = yyjson_doc_mut_copy(pdoc, NULL);
     yyjson_doc_free(pdoc);
     yyjson_mut_val *mroot = yyjson_mut_doc_get_root(mdoc);
+
+    if (!missed_graph) {
+        (void)attach_missed_graph(mdoc, mroot, store, project, primary_radius);
+    }
 
     yyjson_mut_val *lp_arr = yyjson_mut_arr(mdoc);
 

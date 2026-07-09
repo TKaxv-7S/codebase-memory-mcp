@@ -11,7 +11,11 @@ interface UseGraphDataResult {
   loading: boolean;
   error: string | null;
   progress: LoadProgress;
-  fetchOverview: (project: string, maxNodes?: number) => void;
+  fetchOverview: (
+    project: string,
+    maxNodes?: number,
+    graph?: "code" | "missed",
+  ) => void;
   fetchDetail: (project: string, centerNode: string) => void;
 }
 
@@ -32,12 +36,18 @@ export function clampNodeBudget(value: number): number {
   return stepped;
 }
 
+/** Which graph to lay out: the code graph (default) or the missed graph —
+ *  only files the indexer could not fully cover, as their file structure. */
+export type GraphVariant = "code" | "missed";
+
 export async function fetchLayout(
   project: string,
   maxNodes = GRAPH_RENDER_NODE_LIMIT,
   onProgress?: (progress: LoadProgress) => void,
+  graph: GraphVariant = "code",
 ): Promise<GraphData> {
   const params = new URLSearchParams({ project, max_nodes: String(maxNodes) });
+  if (graph === "missed") params.set("graph", "missed");
   const res = await fetch(`/api/layout?${params}`);
 
   if (!res.ok) {
@@ -83,12 +93,12 @@ export function useGraphData(): UseGraphDataResult {
   const [progress, setProgress] = useState<LoadProgress>(NO_PROGRESS);
 
   const fetchOverview = useCallback(
-    async (project: string, maxNodes?: number) => {
+    async (project: string, maxNodes?: number, graph: GraphVariant = "code") => {
       setLoading(true);
       setError(null);
       setProgress(NO_PROGRESS);
       try {
-        const result = await fetchLayout(project, maxNodes, setProgress);
+        const result = await fetchLayout(project, maxNodes, setProgress, graph);
         setData(result);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to fetch layout");

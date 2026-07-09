@@ -1789,10 +1789,13 @@ int cbm_remove_junie_mcp(const char *config_path) {
 
 /* ── Claude Code pre-tool hooks ───────────────────────────────── */
 
-/* Matcher intentionally excludes Read: gating Read breaks Claude Code's
- * read-before-edit invariant (issue #362). The hook is a non-blocking
- * augmenter, never a gate. */
-#define CMM_HOOK_MATCHER "Grep|Glob"
+/* Matcher includes Read for the indexing-coverage note (#963): when the agent
+ * reads a file the indexer could not fully cover, the hook injects a warning
+ * as additionalContext. The issue-#362 hazard (a GATING hook denying Read and
+ * breaking the read-before-edit invariant) cannot recur: the augmenter is
+ * structurally non-blocking — it always exits 0 and only ever ADDS context —
+ * mirroring the Gemini matcher, which already includes read_file. */
+#define CMM_HOOK_MATCHER "Grep|Glob|Read"
 /* Basename only; the full command path is resolved at install time via
  * cbm_resolve_hook_command so $CLAUDE_CONFIG_DIR is honored. */
 #define CMM_HOOK_GATE_SCRIPT "cbm-code-discovery-gate"
@@ -1805,7 +1808,7 @@ int cbm_remove_junie_mcp(const char *config_path) {
  * Per-agent lists (no shared global): each caller passes its own. */
 static const char *const cmm_claude_old_matchers[] = {
     "Grep|Glob|Read|Search",
-    "Grep|Glob|Read",
+    "Grep|Glob", /* pre-#963 matcher — Read re-added for the coverage note */
     NULL,
 };
 static const char *const cmm_gemini_old_matchers[] = {

@@ -929,21 +929,24 @@ if ! path_match "$CMD" "$SELF_PATH"; then
 fi
 echo "OK 8c: Claude Code MCP (.claude/.mcp.json)"
 
-# 8d: Claude Code hooks — matcher must be exactly "Grep|Glob" (no Read, no Search).
-# Gating Read breaks Claude Code's read-before-edit invariant (issue #362), so
-# this assertion locks in the matcher to prevent regressions.
+# 8d: Claude Code hooks — matcher must be exactly "Grep|Glob|Read" (no Search).
+# Read is matched for the indexing-coverage note (#963); safe against the old
+# issue-#362 gate hazard because the augmenter is structurally non-blocking
+# (always exit 0, additionalContext only). This assertion locks in the exact
+# matcher to prevent both regressions (Read dropped again) and creep (Search
+# or catch-all matchers sneaking back).
 if ! cat "$FAKE_HOME/.claude/settings.json" 2>/dev/null | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 hooks = d.get('hooks', {}).get('PreToolUse', [])
-ok = any(h.get('matcher') == 'Grep|Glob' for h in hooks)
-bad = any('Read' in str(h.get('matcher', '')) for h in hooks)
+ok = any(h.get('matcher') == 'Grep|Glob|Read' for h in hooks)
+bad = any('Search' in str(h.get('matcher', '')) for h in hooks)
 sys.exit(0 if (ok and not bad) else 1)
 " 2>/dev/null; then
-  echo "FAIL 8d: PreToolUse hook matcher is not exactly 'Grep|Glob' (or still contains Read)"
+  echo "FAIL 8d: PreToolUse hook matcher is not exactly 'Grep|Glob|Read'"
   exit 1
 fi
-echo "OK 8d: Claude Code PreToolUse hook (matcher=Grep|Glob, Read excluded)"
+echo "OK 8d: Claude Code PreToolUse hook (matcher=Grep|Glob|Read)"
 
 # 8e: Claude Code shim script — must be non-blocking augmenter, not a gate.
 if [ "$(uname -s)" != "MINGW64_NT" ] 2>/dev/null; then

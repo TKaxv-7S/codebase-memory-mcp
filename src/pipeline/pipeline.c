@@ -1114,6 +1114,29 @@ static int dump_and_persist_hashes(cbm_pipeline_t *p, const cbm_file_info_t *fil
         }
         CBM_PROF_END_N("persist", "4_file_hashes", t_fh, file_count);
 
+        /* Coverage rows (#963): a full run's file_errors is the complete
+         * coverage truth for the project. The dump recreated the DB file, so
+         * the separate index_coverage table starts empty — write only when
+         * there is something to record (AFTER hashes, so the deleted-file
+         * prune inside replace sees the live file set). */
+        if (p->file_errors_count > 0) {
+            cbm_coverage_row_t *cov =
+                (cbm_coverage_row_t *)malloc((size_t)p->file_errors_count * sizeof(*cov));
+            if (cov) {
+                for (int i = 0; i < p->file_errors_count; i++) {
+                    cov[i].rel_path = p->file_errors[i].path;
+                    cov[i].kind = p->file_errors[i].phase;
+                    cov[i].detail = p->file_errors[i].reason;
+                }
+                if (cbm_store_coverage_replace(hash_store, p->project_name, cov,
+                                               p->file_errors_count) != CBM_STORE_OK) {
+                    cbm_log_error("pipeline.err", "phase", "persist_coverage", "project",
+                                  p->project_name);
+                }
+                free(cov);
+            }
+        }
+
         /* FTS5 backfill: populate nodes_fts with camelCase-split names.
          * Contentless FTS5 requires the special 'delete-all' command instead of
          * DELETE FROM to wipe prior rows (there's no underlying content table).

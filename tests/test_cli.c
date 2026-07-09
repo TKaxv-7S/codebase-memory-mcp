@@ -2425,11 +2425,10 @@ TEST(cli_upsert_claude_hook_fresh) {
     const char *data = read_test_file(settingspath);
     ASSERT_NOT_NULL(data);
     ASSERT(strstr(data, "PreToolUse") != NULL);
-    /* Matcher excludes Read per issue #362 (gating Read breaks the
-     * read-before-edit invariant). Assert exact matcher value AND that no
-     * Read-chained matcher slipped back in. */
-    ASSERT(strstr(data, "\"Grep|Glob\"") != NULL);
-    ASSERT(strstr(data, "Glob|Read") == NULL);
+    /* Matcher includes Read for the coverage note (#963). Safe against the
+     * issue-#362 gate hazard: the augmenter is structurally non-blocking
+     * (always exit 0, additionalContext only). */
+    ASSERT(strstr(data, "\"Grep|Glob|Read\"") != NULL);
     ASSERT(strstr(data, "cbm-code-discovery-gate") != NULL);
 
     test_rmdir_r(tmpdir);
@@ -2499,9 +2498,8 @@ TEST(cli_upsert_claude_hook_existing) {
 
     const char *data = read_test_file(settingspath);
     ASSERT_NOT_NULL(data);
-    /* Our hook added with the non-blocking matcher (issue #362). */
-    ASSERT(strstr(data, "\"Grep|Glob\"") != NULL);
-    ASSERT(strstr(data, "Glob|Read") == NULL);
+    /* Our hook added with the current matcher (Read included for #963). */
+    ASSERT(strstr(data, "\"Grep|Glob|Read\"") != NULL);
     /* Existing hook preserved */
     ASSERT(strstr(data, "Bash") != NULL);
     ASSERT(strstr(data, "firewall") != NULL);
@@ -2518,9 +2516,9 @@ TEST(cli_upsert_claude_hook_replace) {
 
     char settingspath[512];
     snprintf(settingspath, sizeof(settingspath), "%s/settings.json", tmpdir);
-    /* Pre-existing CMM hook with old message */
+    /* Pre-existing CMM hook with an OLD matcher (pre-#963) + old message */
     write_test_file(settingspath,
-                    "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Grep|Glob|Read\","
+                    "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Grep|Glob\","
                     "\"hooks\":[{\"type\":\"command\",\"command\":\"echo old-cmm-message\"}]}]}}");
 
     int rc = cbm_upsert_claude_hooks(settingspath);
@@ -3049,9 +3047,9 @@ TEST(cli_sha256_file_matches_known_vector) {
         "", 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
     ASSERT_TRUE(sha256_vector_ok(
         "abc", 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
-    ASSERT_TRUE(sha256_vector_ok(
-        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56,
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+    ASSERT_TRUE(
+        sha256_vector_ok("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56,
+                         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
     PASS();
 }
 

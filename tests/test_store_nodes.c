@@ -1593,7 +1593,68 @@ TEST(store_count_nodes_unknown_project) {
     PASS();
 }
 
+/* ── Index coverage (#963) ──────────────────────────────────────── */
+
+/* Round-trip + deleted-file prune + shadow miss-graph materialization +
+ * empty-replace wipe. The prune keys off file_hashes (the live-file set), so
+ * a row for a file with no hash row must not survive the replace. */
+TEST(store_coverage_roundtrip_prune_shadow) {
+    cbm_store_t *s = cbm_store_open_memory();
+    cbm_store_upsert_project(s, "test", "/tmp/test");
+    cbm_store_upsert_file_hash(s, "test", "src/a.py", "", 1, 10);
+
+    cbm_coverage_row_t rows[] = {
+        {.rel_path = "src/a.py", .kind = "parse_partial", .detail = "4-7"},
+        {.rel_path = "gone.py", .kind = "oversized", .detail = "too big"},
+    };
+    ASSERT_EQ(cbm_store_coverage_replace(s, "test", rows, 2), CBM_STORE_OK);
+
+    cbm_coverage_row_t *got = NULL;
+    int n = 0;
+    ASSERT_EQ(cbm_store_coverage_get(s, "test", &got, &n), CBM_STORE_OK);
+    ASSERT_EQ(n, 1); /* gone.py pruned — no file_hashes row */
+    ASSERT_STR_EQ(got[0].rel_path, "src/a.py");
+    ASSERT_STR_EQ(got[0].kind, "parse_partial");
+    ASSERT_STR_EQ(got[0].detail, "4-7");
+    cbm_store_free_coverage(got, n);
+
+    /* Shadow miss-graph materialized under "test::missed":
+     * Project → Folder(src) → File(a.py){kind,detail}. */
+    cbm_node_t *nodes = NULL;
+    int nc = 0;
+    ASSERT_EQ(cbm_store_find_nodes_by_label(s, "test::missed", "File", &nodes, &nc), CBM_STORE_OK);
+    ASSERT_EQ(nc, 1);
+    ASSERT_STR_EQ(nodes[0].file_path, "src/a.py");
+    ASSERT_NOT_NULL(strstr(nodes[0].properties_json, "\"kind\":\"parse_partial\""));
+    ASSERT_NOT_NULL(strstr(nodes[0].properties_json, "\"detail\":\"4-7\""));
+    cbm_store_free_nodes(nodes, nc);
+    nodes = NULL;
+    nc = 0;
+    ASSERT_EQ(cbm_store_find_nodes_by_label(s, "test::missed", "Folder", &nodes, &nc),
+              CBM_STORE_OK);
+    ASSERT_EQ(nc, 1);
+    ASSERT_STR_EQ(nodes[0].name, "src");
+    cbm_store_free_nodes(nodes, nc);
+
+    /* Empty replace clears the table AND wipes the shadow graph. */
+    ASSERT_EQ(cbm_store_coverage_replace(s, "test", NULL, 0), CBM_STORE_OK);
+    got = NULL;
+    n = 0;
+    ASSERT_EQ(cbm_store_coverage_get(s, "test", &got, &n), CBM_STORE_OK);
+    ASSERT_EQ(n, 0);
+    free(got);
+    nodes = NULL;
+    nc = 0;
+    ASSERT_EQ(cbm_store_find_nodes_by_label(s, "test::missed", "File", &nodes, &nc), CBM_STORE_OK);
+    ASSERT_EQ(nc, 0);
+    cbm_store_free_nodes(nodes, nc);
+
+    cbm_store_close(s);
+    PASS();
+}
+
 SUITE(store_nodes) {
+    RUN_TEST(store_coverage_roundtrip_prune_shadow);
     RUN_TEST(store_open_memory);
     RUN_TEST(store_close_null);
     RUN_TEST(store_open_memory_twice);

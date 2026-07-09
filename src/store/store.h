@@ -398,6 +398,40 @@ int cbm_store_delete_file_hash(cbm_store_t *s, const char *project, const char *
 
 int cbm_store_delete_file_hashes(cbm_store_t *s, const char *project);
 
+/* ── Index coverage (#963) ──────────────────────────────────────── */
+
+/* One best-effort coverage row: a file the indexer could not fully cover.
+ * kind "parse_partial" = indexed but the parse tree had ERROR/MISSING regions
+ * (detail = 1-based line ranges "12-40,88-90"); skip kinds "read"/"extract"/
+ * "oversized" = not indexed at all (detail = reason). Stored in the separate
+ * index_coverage table — coverage is metadata ABOUT the graph, never mixed
+ * into the graph itself. */
+typedef struct {
+    const char *rel_path;
+    const char *kind;
+    const char *detail;
+} cbm_coverage_row_t;
+
+/* Replace the project's coverage rows in one transaction, then prune rows for
+ * files absent from file_hashes (deleted from the repo). Call AFTER hashes
+ * were persisted for the run. */
+int cbm_store_coverage_replace(cbm_store_t *s, const char *project, const cbm_coverage_row_t *rows,
+                               int count);
+
+/* Fetch all coverage rows (ordered by rel_path). Caller frees via
+ * cbm_store_free_coverage. */
+int cbm_store_coverage_get(cbm_store_t *s, const char *project, cbm_coverage_row_t **out,
+                           int *count);
+
+/* Name of the derived miss-graph shadow project ("<project>::missed").
+ * cbm_store_coverage_replace materializes the coverage rows as a file-
+ * structure graph (Project → Folder → File{kind, detail}) under this project
+ * name — queryable via the normal cypher path without touching the real
+ * project's graph. */
+void cbm_store_coverage_shadow_project(char *dst, size_t dstsz, const char *project);
+
+void cbm_store_free_coverage(cbm_coverage_row_t *rows, int count);
+
 /* ── Search ─────────────────────────────────────────────────────── */
 
 int cbm_store_search(cbm_store_t *s, const cbm_search_params_t *params, cbm_search_output_t *out);

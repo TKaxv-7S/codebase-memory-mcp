@@ -22,6 +22,7 @@ import {
 import { Sidebar } from "./Sidebar";
 import { FilterPanel } from "./FilterPanel";
 import { NodeDetailPanel } from "./NodeDetailPanel";
+import { MissedCallout } from "./MissedCallout";
 import { ResizeHandle } from "./ResizeHandle";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { GraphNode, GraphData, RepoInfo } from "../lib/types";
@@ -101,6 +102,12 @@ export function GraphTab({ project }: GraphTabProps) {
   /* Filter state — all enabled by default */
   const [enabledLabels, setEnabledLabels] = useState<Set<string>>(new Set());
   const [enabledEdgeTypes, setEnabledEdgeTypes] = useState<Set<string>>(new Set());
+
+  /* Missed skeleton (#963): the file structure of files the indexer could
+   * not fully cover, shown as a white satellite cluster beside the code
+   * galaxy. Toggle only hides/shows it — the data rides along with every
+   * code-graph layout. */
+  const [showMissedSkeleton, setShowMissedSkeleton] = useState(true);
 
   /* Dead-code view: recolor by status + status-based filters */
   const [deadCodeView, setDeadCodeView] = useState(false);
@@ -190,6 +197,48 @@ export function GraphTab({ project }: GraphTabProps) {
     }
   }, [project, budget, fetchOverview]);
 
+  /* Missed skeleton: offset into place and paint white — a ghost of the
+   * files the graph could not fully cover, sitting beside the galaxy. */
+  const missedSkeleton = useMemo(() => {
+    const mg = data?.missed_graph;
+    if (!mg || mg.nodes.length === 0) return null;
+    const nodes = mg.nodes.map((n) => ({
+      ...n,
+      x: n.x + mg.offset.x,
+      y: n.y + mg.offset.y,
+      z: n.z + mg.offset.z,
+      color: "#e9eef5",
+    }));
+    return { nodes, edges: mg.edges, ids: new Set(nodes.map((n) => n.id)) };
+  }, [data]);
+
+  /* Overview framing: both clusters (galaxy + skeleton) in one shot. */
+  const overviewTarget = useMemo(() => {
+    if (!data) return null;
+    const all = missedSkeleton ? [...data.nodes, ...missedSkeleton.nodes] : data.nodes;
+    return computeCameraTarget(all, new Set(all.map((n) => n.id)));
+  }, [data, missedSkeleton]);
+
+  /* With a skeleton beside the galaxy, auto-frame BOTH clusters on load so
+   * the side-by-side composition is visible without manual zooming. */
+  useEffect(() => {
+    if (missedSkeleton && overviewTarget) {
+      setCameraTarget(overviewTarget);
+    }
+  }, [missedSkeleton, overviewTarget]);
+
+  /* Clicking empty space while the skeleton has focus flies back to the
+   * overview (the galaxy may be entirely off-screen at that point, so there
+   * is no code node to click). No-op during normal galaxy exploration. */
+  const handleBackgroundClick = useCallback(() => {
+    if (selectedNode && missedSkeleton?.ids.has(selectedNode.id) && overviewTarget) {
+      setSelectedNode(null);
+      setHighlightedIds(null);
+      setSelectedPath(null);
+      setCameraTarget(overviewTarget);
+    }
+  }, [selectedNode, missedSkeleton, overviewTarget]);
+
   /* Fetch git remote metadata for GitHub deep-links */
   useEffect(() => {
     if (!project) {
@@ -226,6 +275,19 @@ export function GraphTab({ project }: GraphTabProps) {
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
       if (!filteredData) return;
+
+      /* Clicking the missed skeleton re-centers the camera on that whole
+       * cluster (it's small — the natural focus unit is the skeleton, not a
+       * single node); clicking any code node flies back to the code galaxy
+       * via the normal per-node focus below. */
+      if (missedSkeleton?.ids.has(node.id)) {
+        setSelectedNode(node);
+        setHighlightedIds(null);
+        setSelectedPath(node.file_path ?? null);
+        setCameraTarget(computeCameraTarget(missedSkeleton.nodes, missedSkeleton.ids));
+        return;
+      }
+
       setSelectedNode(node);
 
       /* Highlight the node and its direct connections */
@@ -238,7 +300,7 @@ export function GraphTab({ project }: GraphTabProps) {
       setSelectedPath(node.file_path ?? null);
       setCameraTarget(computeCameraTarget(filteredData.nodes, connectedIds));
     },
-    [filteredData],
+    [filteredData, missedSkeleton],
   );
 
   const handleNavigateToNode = useCallback(
@@ -351,6 +413,9 @@ export function GraphTab({ project }: GraphTabProps) {
           onToggleShowOnlyDead={() => setShowOnlyDead((v) => !v)}
           onToggleHideEntryPoints={() => setHideEntryPoints((v) => !v)}
           onToggleHideTests={() => setHideTests((v) => !v)}
+          missedView={showMissedSkeleton}
+          missedCount={data?.missed_graph?.nodes.filter((n) => n.label === "File").length ?? 0}
+          onToggleMissedView={() => setShowMissedSkeleton((v) => !v)}
         />
         <Sidebar
           nodes={filteredData.nodes}
@@ -385,11 +450,13 @@ export function GraphTab({ project }: GraphTabProps) {
             <ErrorBoundary>
               <GraphScene
                 data={filteredData}
+                missed={showMissedSkeleton ? missedSkeleton : null}
                 highlightedIds={highlightedIds}
                 cameraTarget={cameraTarget}
                 showLabels={showLabels}
                 display={display}
                 onNodeClick={handleNodeClick}
+                onBackgroundClick={handleBackgroundClick}
               />
             </ErrorBoundary>
 
@@ -490,19 +557,34 @@ export function GraphTab({ project }: GraphTabProps) {
             className="border-l border-border shrink-0 h-full overflow-hidden"
             style={{ width: rightWidth, maxHeight: "100%" }}
           >
-            <NodeDetailPanel
-              node={selectedNode}
-              allNodes={filteredData.nodes}
-              allEdges={filteredData.edges}
-              project={project}
-              repoInfo={repoInfo}
-              onClose={() => {
-                setSelectedNode(null);
-                setHighlightedIds(null);
-                setSelectedPath(null);
-              }}
-              onNavigate={handleNavigateToNode}
-            />
+            {missedSkeleton?.ids.has(selectedNode.id) ? (
+              /* Skeleton node: the standard panel (code snippet, callers) is
+               * meaningless for a not-fully-indexed file — show the coverage
+               * callout with its report-the-edge-case actions instead. */
+              <MissedCallout
+                node={selectedNode}
+                project={project}
+                onClose={() => {
+                  setSelectedNode(null);
+                  setHighlightedIds(null);
+                  setSelectedPath(null);
+                }}
+              />
+            ) : (
+              <NodeDetailPanel
+                node={selectedNode}
+                allNodes={filteredData.nodes}
+                allEdges={filteredData.edges}
+                project={project}
+                repoInfo={repoInfo}
+                onClose={() => {
+                  setSelectedNode(null);
+                  setHighlightedIds(null);
+                  setSelectedPath(null);
+                }}
+                onNavigate={handleNavigateToNode}
+              />
+            )}
           </div>
         </>
       )}

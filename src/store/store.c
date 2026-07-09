@@ -269,6 +269,19 @@ static int init_schema(cbm_store_t *s) {
         "  source_hash TEXT NOT NULL,"
         "  created_at TEXT NOT NULL,"
         "  updated_at TEXT NOT NULL"
+        ");"
+        /* Best-effort indexing-coverage signal (#963). One row per file the
+         * indexer could not fully cover: kind "parse_partial" (indexed, but the
+         * parse tree had ERROR/MISSING regions — detail = 1-based line ranges)
+         * or a skip phase ("read"/"extract"/"oversized" — detail = reason).
+         * Deliberately SEPARATE from the graph tables: coverage is metadata
+         * about the graph, not part of it. */
+        "CREATE TABLE IF NOT EXISTS index_coverage ("
+        "  project TEXT NOT NULL,"
+        "  rel_path TEXT NOT NULL,"
+        "  kind TEXT NOT NULL,"
+        "  detail TEXT DEFAULT '',"
+        "  PRIMARY KEY (project, rel_path, kind)"
         ");";
 
     int rc = exec_sql(s, ddl);
@@ -1831,6 +1844,248 @@ int cbm_store_delete_file_hashes(cbm_store_t *s, const char *project) {
         return CBM_STORE_ERR;
     }
     return CBM_STORE_OK;
+}
+
+/* ── Index coverage (#963) ──────────────────────────────────────── */
+
+void cbm_store_coverage_shadow_project(char *dst, size_t dstsz, const char *project) {
+    snprintf(dst, dstsz, "%s::missed", project);
+}
+
+/* Minimal JSON string escape (quotes, backslashes, control chars → space). */
+static void cov_json_escape(char *dst, size_t dstsz, const char *src) {
+    size_t o = 0;
+    for (const char *p = src; *p && o + 2 < dstsz; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') {
+            dst[o++] = '\\';
+            dst[o++] = (char)c;
+        } else if (c < 0x20) {
+            dst[o++] = ' ';
+        } else {
+            dst[o++] = (char)c;
+        }
+    }
+    dst[o] = '\0';
+}
+
+/* Rebuild the derived miss-GRAPH view under the shadow project
+ * "<project>::missed": ONLY the not-fully-indexed files, laid out as the
+ * file structure (Project → Folder chain → File), each File carrying
+ * {kind, detail}. Queryable via query_graph(graph="missed") with zero
+ * cypher-engine changes; the real project's graph gains no rows. Derived
+ * data — rebuilt from the authoritative (post-prune) table contents. */
+static void cov_rebuild_shadow_graph(cbm_store_t *s, const char *project) {
+    char covproj[CBM_SZ_512];
+    cbm_store_coverage_shadow_project(covproj, sizeof(covproj), project);
+
+    /* Wipe the previous view (edges first: no FK pragma guarantee). */
+    static const char *wipes[] = {"DELETE FROM edges WHERE project = ?1;",
+                                  "DELETE FROM nodes WHERE project = ?1;"};
+    for (int w = 0; w < 2; w++) {
+        sqlite3_stmt *del = NULL;
+        if (sqlite3_prepare_v2(s->db, wipes[w], CBM_NOT_FOUND, &del, NULL) == SQLITE_OK) {
+            bind_text(del, SKIP_ONE, covproj);
+            (void)sqlite3_step(del);
+            sqlite3_finalize(del);
+        }
+    }
+
+    cbm_coverage_row_t *rows = NULL;
+    int count = 0;
+    if (cbm_store_coverage_get(s, project, &rows, &count) != CBM_STORE_OK || count == 0) {
+        cbm_store_free_coverage(rows, count);
+        return;
+    }
+
+    /* nodes.project has an FK to projects(name) (enforced: foreign_keys=ON),
+     * so the shadow project needs its row. Invisible to list_projects, which
+     * scans the cache directory for .db files, not this table. */
+    if (cbm_store_upsert_project(s, covproj, "") != CBM_STORE_OK) {
+        cbm_store_free_coverage(rows, count);
+        return;
+    }
+
+    cbm_node_t root = {.project = covproj,
+                       .label = "Project",
+                       .name = project,
+                       .qualified_name = covproj,
+                       .properties_json = "{}"};
+    int64_t root_id = cbm_store_upsert_node(s, &root);
+
+    for (int i = 0; i < count; i++) {
+        const char *rel = rows[i].rel_path;
+        if (!rel || !rel[0] || root_id <= 0) {
+            continue;
+        }
+        char pathbuf[CBM_SZ_1K];
+        snprintf(pathbuf, sizeof(pathbuf), "%s", rel);
+
+        int64_t parent = root_id;
+        for (char *p = pathbuf; *p; p++) {
+            if (*p != '/') {
+                continue;
+            }
+            /* Truncate at this slash → pathbuf is the directory prefix; the
+             * upsert binds copies, so restore the slash right after. */
+            *p = '\0';
+            const char *seg = strrchr(pathbuf, '/');
+            cbm_node_t folder = {.project = covproj,
+                                 .label = "Folder",
+                                 .name = seg ? seg + 1 : pathbuf,
+                                 .qualified_name = pathbuf,
+                                 .file_path = pathbuf,
+                                 .properties_json = "{}"};
+            int64_t fid = cbm_store_upsert_node(s, &folder);
+            *p = '/';
+            if (fid > 0) {
+                cbm_edge_t e = {.project = covproj,
+                                .source_id = parent,
+                                .target_id = fid,
+                                .type = "CONTAINS_FOLDER",
+                                .properties_json = "{}"};
+                (void)cbm_store_insert_edge(s, &e);
+                parent = fid;
+            }
+        }
+
+        const char *base = strrchr(rel, '/');
+        char props[CBM_SZ_2K];
+        char detail_esc[CBM_SZ_1K];
+        cov_json_escape(detail_esc, sizeof(detail_esc), rows[i].detail ? rows[i].detail : "");
+        snprintf(props, sizeof(props), "{\"kind\":\"%s\",\"detail\":\"%s\"}",
+                 rows[i].kind ? rows[i].kind : "", detail_esc);
+        cbm_node_t file = {.project = covproj,
+                           .label = "File",
+                           .name = base ? base + 1 : rel,
+                           .qualified_name = rel,
+                           .file_path = rel,
+                           .properties_json = props};
+        int64_t file_id = cbm_store_upsert_node(s, &file);
+        if (file_id > 0) {
+            cbm_edge_t e = {.project = covproj,
+                            .source_id = parent,
+                            .target_id = file_id,
+                            .type = "CONTAINS_FILE",
+                            .properties_json = "{}"};
+            (void)cbm_store_insert_edge(s, &e);
+        }
+    }
+    cbm_store_free_coverage(rows, count);
+}
+
+int cbm_store_coverage_replace(cbm_store_t *s, const char *project, const cbm_coverage_row_t *rows,
+                               int count) {
+    if (!s || !s->db || !project) {
+        return CBM_STORE_ERR;
+    }
+    if (exec_sql(s, "BEGIN;") != CBM_STORE_OK) {
+        return CBM_STORE_ERR;
+    }
+    sqlite3_stmt *del = NULL;
+    if (sqlite3_prepare_v2(s->db, "DELETE FROM index_coverage WHERE project = ?1;", CBM_NOT_FOUND,
+                           &del, NULL) != SQLITE_OK) {
+        store_set_error_sqlite(s, "coverage delete prepare");
+        (void)exec_sql(s, "ROLLBACK;");
+        return CBM_STORE_ERR;
+    }
+    bind_text(del, SKIP_ONE, project);
+    int rc = sqlite3_step(del);
+    sqlite3_finalize(del);
+    if (rc != SQLITE_DONE) {
+        store_set_error_sqlite(s, "coverage delete");
+        (void)exec_sql(s, "ROLLBACK;");
+        return CBM_STORE_ERR;
+    }
+    sqlite3_stmt *ins = NULL;
+    if (sqlite3_prepare_v2(
+            s->db,
+            "INSERT OR REPLACE INTO index_coverage (project, rel_path, kind, detail) "
+            "VALUES (?1, ?2, ?3, ?4);",
+            CBM_NOT_FOUND, &ins, NULL) != SQLITE_OK) {
+        store_set_error_sqlite(s, "coverage insert prepare");
+        (void)exec_sql(s, "ROLLBACK;");
+        return CBM_STORE_ERR;
+    }
+    for (int i = 0; i < count; i++) {
+        if (!rows[i].rel_path || !rows[i].kind) {
+            continue;
+        }
+        bind_text(ins, SKIP_ONE, project);
+        bind_text(ins, ST_COL_2, rows[i].rel_path);
+        bind_text(ins, ST_COL_3, rows[i].kind);
+        bind_text(ins, CBM_SZ_4, rows[i].detail ? rows[i].detail : "");
+        if (sqlite3_step(ins) != SQLITE_DONE) {
+            store_set_error_sqlite(s, "coverage insert");
+            sqlite3_finalize(ins);
+            (void)exec_sql(s, "ROLLBACK;");
+            return CBM_STORE_ERR;
+        }
+        sqlite3_reset(ins);
+    }
+    sqlite3_finalize(ins);
+    /* Prune rows for files no longer known to the index (deleted from the
+     * repo): file_hashes is the authoritative live-file set after persist. */
+    sqlite3_stmt *prune = NULL;
+    if (sqlite3_prepare_v2(s->db,
+                           "DELETE FROM index_coverage WHERE project = ?1 AND rel_path NOT IN "
+                           "(SELECT rel_path FROM file_hashes WHERE project = ?1);",
+                           CBM_NOT_FOUND, &prune, NULL) == SQLITE_OK) {
+        bind_text(prune, SKIP_ONE, project);
+        (void)sqlite3_step(prune);
+        sqlite3_finalize(prune);
+    }
+    /* Rebuild the derived miss-graph view from the now-authoritative table
+     * contents (same transaction — the table and its view stay in step). */
+    cov_rebuild_shadow_graph(s, project);
+    return exec_sql(s, "COMMIT;");
+}
+
+int cbm_store_coverage_get(cbm_store_t *s, const char *project, cbm_coverage_row_t **out,
+                           int *count) {
+    *out = NULL;
+    *count = 0;
+    if (!s || !s->db || !project) {
+        return CBM_STORE_ERR;
+    }
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db,
+                           "SELECT rel_path, kind, detail FROM index_coverage "
+                           "WHERE project = ?1 ORDER BY rel_path, kind;",
+                           CBM_NOT_FOUND, &stmt, NULL) != SQLITE_OK) {
+        store_set_error_sqlite(s, "coverage get prepare");
+        return CBM_STORE_ERR;
+    }
+    bind_text(stmt, SKIP_ONE, project);
+    int cap = ST_INIT_CAP_16;
+    int n = 0;
+    cbm_coverage_row_t *arr = malloc(cap * sizeof(cbm_coverage_row_t));
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (n >= cap) {
+            cap *= ST_GROWTH;
+            arr = safe_realloc(arr, cap * sizeof(cbm_coverage_row_t));
+        }
+        arr[n].rel_path = heap_strdup((const char *)sqlite3_column_text(stmt, 0));
+        arr[n].kind = heap_strdup((const char *)sqlite3_column_text(stmt, SKIP_ONE));
+        arr[n].detail = heap_strdup((const char *)sqlite3_column_text(stmt, CBM_SZ_2));
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    *out = arr;
+    *count = n;
+    return CBM_STORE_OK;
+}
+
+void cbm_store_free_coverage(cbm_coverage_row_t *rows, int count) {
+    if (!rows) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        free((char *)rows[i].rel_path);
+        free((char *)rows[i].kind);
+        free((char *)rows[i].detail);
+    }
+    free(rows);
 }
 
 /* ── FindNodesByFileOverlap ─────────────────────────────────────── */

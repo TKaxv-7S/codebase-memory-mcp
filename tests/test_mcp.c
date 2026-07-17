@@ -1090,6 +1090,76 @@ static cbm_mcp_server_t *setup_snippet_server(char *tmp_dir, size_t tmp_sz);
 static void cleanup_snippet_dir(const char *tmp_dir);
 static char *extract_text_content(const char *mcp_result);
 
+/* callers_total/callees_total must count what the caller can enumerate: with
+ * include_tests=false (default) test-file rows are hidden from the table, so
+ * the totals must apply the same filter — a raw visited_count overstated the
+ * set (field-eval agent read callers_total=175 against 2 visible rows and
+ * distrusted the tool). */
+TEST(tool_trace_totals_respect_test_filter) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    const char *proj = "totproj";
+    cbm_mcp_server_set_project(srv, proj);
+    cbm_store_upsert_project(st, proj, "/tmp/tot");
+
+    cbm_node_t tgt = {.project = proj,
+                      .label = "Function",
+                      .name = "tgt",
+                      .qualified_name = "totproj.a.tgt",
+                      .file_path = "a.c",
+                      .start_line = 1,
+                      .end_line = 5};
+    int64_t tid = cbm_store_upsert_node(st, &tgt);
+    ASSERT_GT(tid, 0);
+    cbm_node_t prod = {.project = proj,
+                       .label = "Function",
+                       .name = "prod_caller",
+                       .qualified_name = "totproj.a.prod_caller",
+                       .file_path = "a.c",
+                       .start_line = 10,
+                       .end_line = 15};
+    int64_t pid = cbm_store_upsert_node(st, &prod);
+    ASSERT_GT(pid, 0);
+    cbm_node_t tst = {.project = proj,
+                      .label = "Function",
+                      .name = "test_caller",
+                      .qualified_name = "totproj.t.test_caller",
+                      .file_path = "tests/test_x.c",
+                      .start_line = 1,
+                      .end_line = 5};
+    int64_t xid = cbm_store_upsert_node(st, &tst);
+    ASSERT_GT(xid, 0);
+    cbm_edge_t e1 = {.project = proj, .source_id = pid, .target_id = tid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e1), 0);
+    cbm_edge_t e2 = {.project = proj, .source_id = xid, .target_id = tid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e2), 0);
+
+    char *resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":90,\"method\":\"tools/call\",\"params\":{"
+             "\"name\":\"trace_call_path\",\"arguments\":{\"project\":\"totproj\","
+             "\"function_name\":\"tgt\",\"direction\":\"inbound\"}}}");
+    ASSERT_NOT_NULL(resp);
+    char *inner = extract_text_content(resp);
+    free(resp);
+    ASSERT_NOT_NULL(inner);
+    ASSERT_NOT_NULL(strstr(inner, "callers_total: 1")); /* test row filtered */
+    free(inner);
+
+    resp = cbm_mcp_server_handle(
+        srv, "{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"tools/call\",\"params\":{"
+             "\"name\":\"trace_call_path\",\"arguments\":{\"project\":\"totproj\","
+             "\"function_name\":\"tgt\",\"direction\":\"inbound\",\"include_tests\":true}}}");
+    ASSERT_NOT_NULL(resp);
+    inner = extract_text_content(resp);
+    free(resp);
+    ASSERT_NOT_NULL(inner);
+    ASSERT_NOT_NULL(strstr(inner, "callers_total: 2")); /* both visible now */
+    free(inner);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 /* SCC condensation (get_architecture aspect "cycles"): a 3-function CALLS
  * cycle A->B->C->A must be reported as one circular dependency of size 3 with
  * all three members; a separate acyclic chain (D->E) must NOT appear. The
@@ -1255,6 +1325,8 @@ TEST(tool_search_graph_includes_node_properties) {
     inner = extract_text_content(resp);
     ASSERT_NOT_NULL(inner);
     ASSERT_NOT_NULL(strstr(inner, "(rows: name label lines in out signature;"));
+    /* values with spaces are QUOTED so column positions survive */
+    ASSERT_NOT_NULL(strstr(inner, "\"func HandleRequest() error\""));
     ASSERT_NOT_NULL(strstr(inner, "func HandleRequest"));
     free(inner);
     free(resp);
@@ -6936,6 +7008,7 @@ SUITE(mcp) {
     RUN_TEST(tool_get_graph_schema_empty);
     RUN_TEST(tool_unknown_tool);
     RUN_TEST(tool_search_graph_basic);
+    RUN_TEST(tool_trace_totals_respect_test_filter);
     RUN_TEST(tool_get_architecture_cycles_detects_scc);
     RUN_TEST(tool_get_code_snippet_clips_whole_file_node);
     RUN_TEST(tool_search_graph_includes_node_properties);

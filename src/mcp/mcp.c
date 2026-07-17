@@ -459,7 +459,9 @@ static const tool_def_t TOOLS[] = {
      "Use INSTEAD OF grep for callers, dependencies, impact analysis, or data flow tracing. "
      "RESPONSE: prefix-grouped tree rows — callees/callers grouped under their shared "
      "qn-prefix, `name hop` per row (full qn = group prefix + dot + name); exact "
-     "callees_total/callers_total on every page; risk/args flags use a flat table. "
+     "callees_total/callers_total on every page = ALL nodes reachable within depth (transitive, "
+     "not just direct; test files excluded unless include_tests). risk/args flags use a flat "
+     "table. "
      "`truncated: true` + `next` = more rows — pass next back as cursor. "
      "format=\"json\" returns the SAME tree model as structured JSON.",
      "{\"type\":\"object\",\"properties\":{\"function_name\":{\"type\":\"string\"},\"project\":{"
@@ -614,7 +616,10 @@ static const tool_def_t TOOLS[] = {
      "the "
      "changed symbols. outbound = what the changed code depends on. both = union.\"},"
      "\"depth\":{\"type\":\"integer\",\"default\":2,\"description\":\"Max traversal hops from the "
-     "changed symbols.\"},\"base_branch\":{\"type\":"
+     "changed symbols.\"},\"limit\":{\"type\":\"integer\",\"default\":200,\"maximum\":5000,"
+     "\"description\":\"Per-symbol impacted rows shown (nearest hops first). impacted_total is "
+     "always exact and the impacted_modules rollup always complete regardless.\"},"
+     "\"base_branch\":{\"type\":"
      "\"string\",\"default\":\"main\"},\"since\":{\"type\":\"string\",\"description\":"
      "\"Git ref or tag to compare from (e.g. HEAD~5, v0.5.0). Diffs <ref>...HEAD.\"},"
      "\"format\":{\"type\":\"string\",\"enum\":[\"tree\",\"json\"],\"default\":\"tree\"}},"
@@ -2800,8 +2805,10 @@ static void emit_search_results_tree(cbm_sb_t *sb, cbm_search_output_t *out, int
         snprintf(row, sizeof(row), "  %s %s %s %d %d", shortname,
                  sr->node.label ? sr->node.label : "", lines, sr->in_degree, sr->out_degree);
         cbm_sb_append(sb, row);
-        /* Extra property columns (fields param), space-delimited; missing
-         * values emit as "-" so column positions stay stable. */
+        /* Extra property columns (fields param). Routed through the shared
+         * cell emitters so values with spaces (signatures, docstrings) are
+         * QUOTED — a raw append would shift every following column. Missing
+         * values emit as "-" (the emitter's empty-cell placeholder). */
         if (nfields > 0) {
             yyjson_doc *pd =
                 (sr->node.properties_json && sr->node.properties_json[0])
@@ -2810,19 +2817,17 @@ static void emit_search_results_tree(cbm_sb_t *sb, cbm_search_output_t *out, int
             yyjson_val *pr = pd ? yyjson_doc_get_root(pd) : NULL;
             for (int f = 0; f < nfields; f++) {
                 yyjson_val *v = (pr && yyjson_is_obj(pr)) ? yyjson_obj_get(pr, fields[f]) : NULL;
-                char cell[CBM_SZ_256];
                 if (v && yyjson_is_str(v)) {
-                    snprintf(cell, sizeof(cell), " %s", yyjson_get_str(v));
+                    cbm_tree_cell_str(sb, yyjson_get_str(v), false);
                 } else if (v && yyjson_is_int(v)) {
-                    snprintf(cell, sizeof(cell), " %lld", (long long)yyjson_get_int(v));
+                    cbm_tree_cell_int(sb, yyjson_get_int(v), false);
                 } else if (v && yyjson_is_real(v)) {
-                    snprintf(cell, sizeof(cell), " %.3g", yyjson_get_real(v));
+                    cbm_tree_cell_real(sb, yyjson_get_real(v), false);
                 } else if (v && yyjson_is_bool(v)) {
-                    snprintf(cell, sizeof(cell), " %s", yyjson_get_bool(v) ? "true" : "false");
+                    cbm_tree_cell_bool(sb, yyjson_get_bool(v), false);
                 } else {
-                    snprintf(cell, sizeof(cell), " -");
+                    cbm_tree_cell_str(sb, "", false); /* emits "-" */
                 }
-                cbm_sb_append(sb, cell);
             }
             if (pd) {
                 yyjson_doc_free(pd);
@@ -4287,11 +4292,12 @@ static void arch_join_list(char *buf, size_t sz, const char **items, int n) {
 enum { ARCH_SCC_MAX_EDGES = 400000, ARCH_SCC_MAX_CYCLES = 100, ARCH_SCC_MEMBERS_SHOWN = 20 };
 
 static int arch_compute_cycles(cbm_store_t *store, const char *project, int64_t ***out_members,
-                               int **out_sizes, int *out_ncycles, int *scanned_edges,
-                               bool *edges_truncated) {
+                               int **out_sizes, int *out_ncycles, int *out_total_cycles,
+                               int *scanned_edges, bool *edges_truncated) {
     *out_members = NULL;
     *out_sizes = NULL;
     *out_ncycles = 0;
+    *out_total_cycles = 0;
     *scanned_edges = 0;
     *edges_truncated = false;
 
@@ -4340,6 +4346,7 @@ static int arch_compute_cycles(cbm_store_t *store, const char *project, int64_t 
             ncyc++;
         }
     }
+    *out_total_cycles = ncyc; /* the TRUE count, before the display clamp */
     if (ncyc > ARCH_SCC_MAX_CYCLES) {
         ncyc = ARCH_SCC_MAX_CYCLES;
     }
@@ -4714,16 +4721,24 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
             int64_t **members = NULL;
             int *sizes = NULL;
             int ncyc = 0;
+            int total_cyc = 0;
             int scanned = 0;
             bool etrunc = false;
-            if (arch_compute_cycles(store, project, &members, &sizes, &ncyc, &scanned, &etrunc) ==
-                CBM_STORE_OK) {
+            if (arch_compute_cycles(store, project, &members, &sizes, &ncyc, &total_cyc, &scanned,
+                                    &etrunc) == CBM_STORE_OK) {
                 cbm_tree_scalar_int(&sb, "call_edges_scanned", scanned);
+                cbm_tree_scalar_int(&sb, "cycles_total", total_cyc);
                 if (etrunc) {
                     cbm_tree_scalar_bool(&sb, "cycles_partial", true);
                     cbm_tree_scalar_str(&sb, "cycles_hint",
                                         "call graph exceeded the scan budget; cycle list may be "
                                         "incomplete");
+                }
+                if (total_cyc > ncyc) {
+                    char omit[CBM_SZ_128];
+                    snprintf(omit, sizeof(omit), "cycles_omitted: %d  (showing the first %d)\n",
+                             total_cyc - ncyc, ncyc);
+                    cbm_sb_append(&sb, omit);
                 }
                 char hdr[CBM_SZ_128];
                 snprintf(hdr, sizeof(hdr),
@@ -4998,11 +5013,13 @@ static char *handle_get_architecture(cbm_mcp_server_t *srv, const char *args) {
         int64_t **members = NULL;
         int *sizes = NULL;
         int ncyc = 0;
+        int total_cyc = 0;
         int scanned = 0;
         bool etrunc = false;
-        if (arch_compute_cycles(store, project, &members, &sizes, &ncyc, &scanned, &etrunc) ==
-            CBM_STORE_OK) {
+        if (arch_compute_cycles(store, project, &members, &sizes, &ncyc, &total_cyc, &scanned,
+                                &etrunc) == CBM_STORE_OK) {
             yyjson_mut_obj_add_int(doc, root, "call_edges_scanned", scanned);
+            yyjson_mut_obj_add_int(doc, root, "cycles_total", total_cyc);
             yyjson_mut_obj_add_bool(doc, root, "cycles_partial", etrunc);
             yyjson_mut_val *cyc = yyjson_mut_arr(doc);
             for (int c = 0; c < ncyc; c++) {
@@ -5867,6 +5884,24 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
     view_in.visited += in_start;
     view_in.visited_count = in_len;
 
+    /* Totals must count what the caller can actually enumerate: when
+     * include_tests=false the tables hide test-file rows, so raw
+     * visited_count overstated the reachable set (a field-eval agent read
+     * callers_total=175 against a handful of visible rows and distrusted
+     * the tool). Count with the same filter the emitters apply. */
+    int out_total = 0;
+    for (int i = 0; i < tr_out.visited_count; i++) {
+        if (include_tests || !is_test_file(tr_out.visited[i].node.file_path)) {
+            out_total++;
+        }
+    }
+    int in_total = 0;
+    for (int i = 0; i < tr_in.visited_count; i++) {
+        if (include_tests || !is_test_file(tr_in.visited[i].node.file_path)) {
+            in_total++;
+        }
+    }
+
     char *json = NULL;
     if (!trace_legacy_json) {
         cbm_sb_t sb;
@@ -5880,7 +5915,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
          * table (extra columns) in the same tree syntax. */
         bool flat_trace = risk_labels || data_flow;
         if (do_outbound) {
-            cbm_tree_scalar_int(&sb, "callees_total", tr_out.visited_count);
+            cbm_tree_scalar_int(&sb, "callees_total", out_total);
             if (flat_trace) {
                 bfs_to_toon_table(&sb, "callees", &view_out, risk_labels, include_tests, data_flow);
             } else {
@@ -5888,7 +5923,7 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
             }
         }
         if (do_inbound) {
-            cbm_tree_scalar_int(&sb, "callers_total", tr_in.visited_count);
+            cbm_tree_scalar_int(&sb, "callers_total", in_total);
             if (flat_trace) {
                 bfs_to_toon_table(&sb, "callers", &view_in, risk_labels, include_tests, data_flow);
             } else {
@@ -5915,13 +5950,13 @@ static char *handle_trace_call_path(cbm_mcp_server_t *srv, const char *args) {
             yyjson_mut_obj_add_str(doc, root, "mode", mode);
         }
         if (do_outbound) {
-            yyjson_mut_obj_add_int(doc, root, "callees_total", tr_out.visited_count);
+            yyjson_mut_obj_add_int(doc, root, "callees_total", out_total);
             yyjson_mut_obj_add_val(
                 doc, root, "callees",
                 bfs_to_tree_json(doc, &view_out, risk_labels, include_tests, data_flow));
         }
         if (do_inbound) {
-            yyjson_mut_obj_add_int(doc, root, "callers_total", tr_in.visited_count);
+            yyjson_mut_obj_add_int(doc, root, "callers_total", in_total);
             yyjson_mut_obj_add_val(
                 doc, root, "callers",
                 bfs_to_tree_json(doc, &view_in, risk_labels, include_tests, data_flow));
@@ -8551,6 +8586,39 @@ static void detect_module_of(const char *file, char *out, size_t outsz) {
     out[len] = '\0';
 }
 
+/* Aggregate the impact set into the 2-segment module rollup. Fills up to
+ * DETECT_MODCAP (module, count) pairs; symbols beyond the cap land in
+ * *overflow (surfaced as "(other)", never silently dropped). Shared by the
+ * tree and json emitters so both encodings carry the same model. */
+enum { DETECT_MODCAP = 256 };
+
+static int detect_module_rollup(const cbm_traverse_result_t *impact, char mods[][CBM_SZ_128],
+                                int *mcnt, int *overflow) {
+    int nmods = 0;
+    *overflow = 0;
+    for (int i = 0; i < impact->visited_count; i++) {
+        char m[CBM_SZ_128];
+        detect_module_of(impact->visited[i].node.file_path, m, sizeof(m));
+        int j = 0;
+        for (; j < nmods; j++) {
+            if (strcmp(mods[j], m) == 0) {
+                mcnt[j]++;
+                break;
+            }
+        }
+        if (j == nmods) {
+            if (nmods < DETECT_MODCAP) {
+                snprintf(mods[nmods], CBM_SZ_128, "%s", m);
+                mcnt[nmods] = 1;
+                nmods++;
+            } else {
+                (*overflow)++;
+            }
+        }
+    }
+    return nmods;
+}
+
 /* Emit the impacted set as a grouped tree leg: rows grouped under their shared
  * (qn-prefix, file), `name label hop` per row. At most `limit` rows are listed
  * (the visited array is hop-ordered, so the closest — highest-signal — impact
@@ -8847,41 +8915,24 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
             /* module rollup: a quotient view of the blast radius */
             if (impact.visited_count > 0) {
                 cbm_sb_append(&sb, "impacted_modules: (rows: module count)\n");
-                enum { MODCAP = 256 };
-                char mods[MODCAP][CBM_SZ_128];
-                int mcnt[MODCAP];
-                int nmods = 0;
-                int overflow = 0; /* symbols whose module didn't fit MODCAP */
-                for (int i = 0; i < impact.visited_count; i++) {
-                    char m[CBM_SZ_128];
-                    detect_module_of(impact.visited[i].node.file_path, m, sizeof(m));
-                    int j = 0;
-                    for (; j < nmods; j++) {
-                        if (strcmp(mods[j], m) == 0) {
-                            mcnt[j]++;
-                            break;
-                        }
+                char (*mods)[CBM_SZ_128] = malloc(DETECT_MODCAP * CBM_SZ_128);
+                int *mcnt = malloc(DETECT_MODCAP * sizeof(int));
+                if (mods && mcnt) {
+                    int overflow = 0;
+                    int nmods = detect_module_rollup(&impact, mods, mcnt, &overflow);
+                    for (int j = 0; j < nmods; j++) {
+                        char mrow[CBM_SZ_256];
+                        snprintf(mrow, sizeof(mrow), "  %s %d\n", mods[j], mcnt[j]);
+                        cbm_sb_append(&sb, mrow);
                     }
-                    if (j == nmods) {
-                        if (nmods < MODCAP) {
-                            snprintf(mods[nmods], sizeof(mods[nmods]), "%s", m);
-                            mcnt[nmods] = 1;
-                            nmods++;
-                        } else {
-                            overflow++; /* never silently dropped — surfaced below */
-                        }
+                    if (overflow > 0) {
+                        char orow[CBM_SZ_128];
+                        snprintf(orow, sizeof(orow), "  (other) %d\n", overflow);
+                        cbm_sb_append(&sb, orow);
                     }
                 }
-                for (int j = 0; j < nmods; j++) {
-                    char mrow[CBM_SZ_256];
-                    snprintf(mrow, sizeof(mrow), "  %s %d\n", mods[j], mcnt[j]);
-                    cbm_sb_append(&sb, mrow);
-                }
-                if (overflow > 0) {
-                    char orow[CBM_SZ_128];
-                    snprintf(orow, sizeof(orow), "  (other) %d\n", overflow);
-                    cbm_sb_append(&sb, orow);
-                }
+                free(mods);
+                free(mcnt);
             }
             if (truncated) {
                 cbm_tree_scalar_bool(&sb, "truncated", true);
@@ -8925,6 +8976,31 @@ static char *handle_detect_changes(cbm_mcp_server_t *srv, const char *args) {
             yyjson_mut_arr_add_val(imp, o);
         }
         yyjson_mut_obj_add_val(doc, root_obj, "impacted", imp);
+        /* Model parity with the tree encoding: the complete module rollup. */
+        if (impact.visited_count > 0) {
+            char (*mods)[CBM_SZ_128] = malloc(DETECT_MODCAP * CBM_SZ_128);
+            int *mcnt = malloc(DETECT_MODCAP * sizeof(int));
+            if (mods && mcnt) {
+                int overflow = 0;
+                int nmods = detect_module_rollup(&impact, mods, mcnt, &overflow);
+                yyjson_mut_val *rollup = yyjson_mut_arr(doc);
+                for (int j = 0; j < nmods; j++) {
+                    yyjson_mut_val *o = yyjson_mut_obj(doc);
+                    yyjson_mut_obj_add_strcpy(doc, o, "module", mods[j]);
+                    yyjson_mut_obj_add_int(doc, o, "count", mcnt[j]);
+                    yyjson_mut_arr_add_val(rollup, o);
+                }
+                if (overflow > 0) {
+                    yyjson_mut_val *o = yyjson_mut_obj(doc);
+                    yyjson_mut_obj_add_strcpy(doc, o, "module", "(other)");
+                    yyjson_mut_obj_add_int(doc, o, "count", overflow);
+                    yyjson_mut_arr_add_val(rollup, o);
+                }
+                yyjson_mut_obj_add_val(doc, root_obj, "impacted_modules", rollup);
+            }
+            free(mods);
+            free(mcnt);
+        }
         yyjson_mut_obj_add_bool(doc, root_obj, "truncated", truncated);
         if (is_error) {
             char hint_buf[CBM_SZ_256];

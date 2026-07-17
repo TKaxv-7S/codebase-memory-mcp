@@ -105,8 +105,7 @@ static int file_exists(const char *path) {
  * reservation artifacts (for example, -wal, -shm, or .pending) must not make
  * the primary survival assertion pass on their own. */
 static int is_hex_digit(char ch) {
-    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
-           (ch >= 'A' && ch <= 'F');
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
 }
 
 static int is_unique_corrupt_main_name(const char *name) {
@@ -160,8 +159,7 @@ static int is_backup_artifact_name(const char *name) {
 
     size_t corrupt_len = strlen(corrupt_prefix);
     if (strncmp(name, corrupt_prefix, corrupt_len) == 0 &&
-        (name[corrupt_len] == '\0' || name[corrupt_len] == '.' ||
-         name[corrupt_len] == '-')) {
+        (name[corrupt_len] == '\0' || name[corrupt_len] == '.' || name[corrupt_len] == '-')) {
         return 1;
     }
 
@@ -337,9 +335,9 @@ TEST(repro_issue557_corrupt_db_not_silently_deleted) {
 
     char backup_corrupt[720], backup_bak[720];
     snprintf(backup_corrupt, sizeof(backup_corrupt), "%s.corrupt", db_path);
-    snprintf(backup_bak,     sizeof(backup_bak),     "%s.bak",     db_path);
-    int backup_exists = unique_corrupt_main_exists(tmp_cache) ||
-                        file_exists(backup_corrupt) || file_exists(backup_bak);
+    snprintf(backup_bak, sizeof(backup_bak), "%s.bak", db_path);
+    int backup_exists = unique_corrupt_main_exists(tmp_cache) || file_exists(backup_corrupt) ||
+                        file_exists(backup_bak);
 
     /* Clean up temp dir (best effort -- before the assertion so the dir
      * is removed even when the assertion fails and longjmp unwinds). */

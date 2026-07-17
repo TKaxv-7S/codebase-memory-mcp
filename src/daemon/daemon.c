@@ -123,8 +123,8 @@ static cbm_daemon_client_id_t issue_client_id_locked(cbm_daemon_coordinator_t *c
     return coordinator->last_client_id;
 }
 
-static cbm_daemon_subscription_id_t
-issue_subscription_id_locked(cbm_daemon_coordinator_t *coordinator) {
+static cbm_daemon_subscription_id_t issue_subscription_id_locked(
+    cbm_daemon_coordinator_t *coordinator) {
     if (coordinator->last_subscription_id == UINT64_MAX) {
         return CBM_DAEMON_SUBSCRIPTION_ID_INVALID;
     }
@@ -163,8 +163,7 @@ static cbm_daemon_watch_t *find_watch_locked(cbm_daemon_coordinator_t *coordinat
 }
 
 static bool remove_subscription_locked(cbm_daemon_subscription_t **subscriptions,
-                                       size_t *subscription_count,
-                                       cbm_daemon_client_id_t client_id,
+                                       size_t *subscription_count, cbm_daemon_client_id_t client_id,
                                        cbm_daemon_subscription_id_t subscription_id) {
     cbm_daemon_subscription_t **cursor = subscriptions;
     while (*cursor) {
@@ -204,8 +203,7 @@ static void callback_batch_init_locked(cbm_daemon_coordinator_t *coordinator,
     batch->context = coordinator->hooks.context;
 }
 
-static void request_job_cancel_locked(cbm_daemon_coordinator_t *coordinator,
-                                      cbm_daemon_job_t *job,
+static void request_job_cancel_locked(cbm_daemon_coordinator_t *coordinator, cbm_daemon_job_t *job,
                                       cbm_daemon_callback_batch_t *batch) {
     if (job->subscription_count != 0 || job->state != CBM_DAEMON_JOB_RUNNING) {
         return;
@@ -287,8 +285,7 @@ static void release_client_resources_locked(cbm_daemon_coordinator_t *coordinato
 }
 
 static void release_client_locked(cbm_daemon_coordinator_t *coordinator,
-                                  cbm_daemon_client_t *client,
-                                  cbm_daemon_callback_batch_t *batch) {
+                                  cbm_daemon_client_t *client, cbm_daemon_callback_batch_t *batch) {
     release_client_resources_locked(coordinator, client->id, batch);
     free(client);
     coordinator->client_count--;
@@ -297,9 +294,8 @@ static void release_client_locked(cbm_daemon_coordinator_t *coordinator,
     }
 }
 
-static bool terminal_job_locked(cbm_daemon_coordinator_t *coordinator,
-                                const char *project_key, bool require_cancellation,
-                                cbm_daemon_job_t **free_after_unlock) {
+static bool terminal_job_locked(cbm_daemon_coordinator_t *coordinator, const char *project_key,
+                                bool require_cancellation, cbm_daemon_job_t **free_after_unlock) {
     cbm_daemon_job_t **cursor = &coordinator->jobs;
     while (*cursor && strcmp((*cursor)->project_key, project_key) != 0) {
         cursor = &(*cursor)->next;
@@ -373,8 +369,7 @@ bool cbm_daemon_coordinator_set_hooks(cbm_daemon_coordinator_t *coordinator,
     return true;
 }
 
-cbm_daemon_coordinator_state_t
-cbm_daemon_coordinator_state(cbm_daemon_coordinator_t *coordinator) {
+cbm_daemon_coordinator_state_t cbm_daemon_coordinator_state(cbm_daemon_coordinator_t *coordinator) {
     if (!coordinator) {
         return CBM_DAEMON_COORDINATOR_STOPPING;
     }
@@ -496,10 +491,9 @@ size_t cbm_daemon_active_clients(cbm_daemon_coordinator_t *coordinator) {
     return count;
 }
 
-cbm_daemon_subscription_result_t
-cbm_daemon_job_subscribe(cbm_daemon_coordinator_t *coordinator,
-                         cbm_daemon_client_id_t client_id, const char *project_key,
-                         cbm_daemon_subscription_id_t *subscription_id) {
+cbm_daemon_subscription_result_t cbm_daemon_job_subscribe(
+    cbm_daemon_coordinator_t *coordinator, cbm_daemon_client_id_t client_id,
+    const char *project_key, cbm_daemon_subscription_id_t *subscription_id) {
     if (subscription_id) {
         *subscription_id = CBM_DAEMON_SUBSCRIPTION_ID_INVALID;
     }
@@ -562,10 +556,9 @@ cbm_daemon_job_subscribe(cbm_daemon_coordinator_t *coordinator,
     return started ? CBM_DAEMON_SUBSCRIPTION_STARTED : CBM_DAEMON_SUBSCRIPTION_JOINED;
 }
 
-cbm_daemon_subscription_result_t
-cbm_daemon_watch_subscribe(cbm_daemon_coordinator_t *coordinator,
-                           cbm_daemon_client_id_t client_id, const char *project_key,
-                           cbm_daemon_subscription_id_t *subscription_id) {
+cbm_daemon_subscription_result_t cbm_daemon_watch_subscribe(
+    cbm_daemon_coordinator_t *coordinator, cbm_daemon_client_id_t client_id,
+    const char *project_key, cbm_daemon_subscription_id_t *subscription_id) {
     if (subscription_id) {
         *subscription_id = CBM_DAEMON_SUBSCRIPTION_ID_INVALID;
     }
@@ -689,8 +682,7 @@ bool cbm_daemon_watch_unsubscribe(cbm_daemon_coordinator_t *coordinator,
     return removed;
 }
 
-size_t cbm_daemon_job_subscribers(cbm_daemon_coordinator_t *coordinator,
-                                  const char *project_key) {
+size_t cbm_daemon_job_subscribers(cbm_daemon_coordinator_t *coordinator, const char *project_key) {
     if (!coordinator || !project_key) {
         return 0;
     }
@@ -745,8 +737,7 @@ cbm_daemon_job_state_t cbm_daemon_job_state(cbm_daemon_coordinator_t *coordinato
     return state;
 }
 
-bool cbm_daemon_job_reaping(cbm_daemon_coordinator_t *coordinator,
-                            const char *project_key) {
+bool cbm_daemon_job_reaping(cbm_daemon_coordinator_t *coordinator, const char *project_key) {
     if (!coordinator || !project_key) {
         return false;
     }
@@ -760,8 +751,8 @@ bool cbm_daemon_job_reaping(cbm_daemon_coordinator_t *coordinator,
     return transitioned;
 }
 
-bool cbm_daemon_job_reaped(cbm_daemon_coordinator_t *coordinator,
-                           const char *project_key, uint64_t now_ms) {
+bool cbm_daemon_job_reaped(cbm_daemon_coordinator_t *coordinator, const char *project_key,
+                           uint64_t now_ms) {
     (void)now_ms;
     if (!coordinator || !project_key) {
         return false;
@@ -774,8 +765,8 @@ bool cbm_daemon_job_reaped(cbm_daemon_coordinator_t *coordinator,
     return removed;
 }
 
-bool cbm_daemon_job_completed(cbm_daemon_coordinator_t *coordinator,
-                              const char *project_key, uint64_t now_ms) {
+bool cbm_daemon_job_completed(cbm_daemon_coordinator_t *coordinator, const char *project_key,
+                              uint64_t now_ms) {
     (void)now_ms;
     if (!coordinator || !project_key) {
         return false;

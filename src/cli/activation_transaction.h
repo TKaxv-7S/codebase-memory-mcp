@@ -29,8 +29,7 @@ typedef enum {
     CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED = -6,
 } cbm_activation_transaction_status_t;
 
-typedef bool (*cbm_activation_transaction_validator_fn)(
-    const char *target_path, void *context);
+typedef bool (*cbm_activation_transaction_validator_fn)(const char *target_path, void *context);
 
 /* Test-only seam: invoked after an absent target has been revalidated and
  * immediately before its staged candidate is published.  Production callers
@@ -38,8 +37,7 @@ typedef bool (*cbm_activation_transaction_validator_fn)(
 typedef void (*cbm_activation_transaction_before_absent_publish_for_test_fn)(
     const char *target_path, void *context);
 void cbm_activation_transaction_set_before_absent_publish_for_test(
-    cbm_activation_transaction_before_absent_publish_for_test_fn hook,
-    void *context);
+    cbm_activation_transaction_before_absent_publish_for_test_fn hook, void *context);
 
 /* Stage a candidate beside target_path (therefore on the same filesystem).
  * The staged file is private to the current account and executable. */
@@ -54,15 +52,14 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
 
 /* Prepare an atomic removal.  A missing target is a valid no-op transaction. */
 cbm_activation_transaction_status_t cbm_activation_transaction_stage_removal(
-    const char *target_path,
-    cbm_activation_transaction_t **transaction_out);
+    const char *target_path, cbm_activation_transaction_t **transaction_out);
 
 /* Atomically publish the candidate (or remove the target), retaining any old
  * target at backup_path.  If validator rejects the post-commit state, this
  * function rolls back before returning VALIDATION_FAILED. */
 cbm_activation_transaction_status_t cbm_activation_transaction_commit(
-    cbm_activation_transaction_t *transaction,
-    cbm_activation_transaction_validator_fn validator, void *validator_context);
+    cbm_activation_transaction_t *transaction, cbm_activation_transaction_validator_fn validator,
+    void *validator_context);
 
 /* Restore the retained target after a successful commit. */
 cbm_activation_transaction_status_t cbm_activation_transaction_rollback(
@@ -80,16 +77,12 @@ cbm_activation_transaction_status_t cbm_activation_transaction_finalize(
 cbm_activation_transaction_status_t cbm_activation_transaction_close(
     cbm_activation_transaction_t **transaction_io);
 
-const char *cbm_activation_transaction_target_path(
-    const cbm_activation_transaction_t *transaction);
-const char *cbm_activation_transaction_staged_path(
-    const cbm_activation_transaction_t *transaction);
-const char *cbm_activation_transaction_backup_path(
-    const cbm_activation_transaction_t *transaction);
+const char *cbm_activation_transaction_target_path(const cbm_activation_transaction_t *transaction);
+const char *cbm_activation_transaction_staged_path(const cbm_activation_transaction_t *transaction);
+const char *cbm_activation_transaction_backup_path(const cbm_activation_transaction_t *transaction);
 const char *cbm_activation_transaction_deferred_path(
     const cbm_activation_transaction_t *transaction);
 
-const char *cbm_activation_transaction_status_message(
-    cbm_activation_transaction_status_t status);
+const char *cbm_activation_transaction_status_message(cbm_activation_transaction_status_t status);
 
 #endif /* CBM_ACTIVATION_TRANSACTION_H */

@@ -120,6 +120,28 @@ TEST(subprocess_run_exit_nonzero) {
 #endif
 }
 
+/* Daemon background helpers intentionally invoke fixed tool names such as
+ * `curl` and `git`. A shell-free spawn must still perform the normal PATH
+ * lookup for a name without a directory separator; exact binary paths keep
+ * their existing exec semantics. */
+TEST(subprocess_run_resolves_literal_binary_name_from_path) {
+#ifdef _WIN32
+    SKIP_PLATFORM("POSIX PATH/execvp semantics");
+#else
+    const char *argv[] = {"sh", "-c", "exit 0", NULL};
+    cbm_proc_opts_t opts = {
+        .bin = "sh",
+        .argv = argv,
+    };
+    cbm_proc_result_t result;
+    int rc = cbm_subprocess_run(&opts, &result);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(result.outcome, CBM_PROC_CLEAN);
+    ASSERT_EQ(result.exit_code, 0);
+    PASS();
+#endif
+}
+
 /* A child that dies of SIGSEGV must classify as CRASH — NOT exit_nonzero and NOT
  * killed. This is the whole point of the primitive: distinguish a crash from a
  * clean failure so the supervisor can quarantine the culprit. */
@@ -151,7 +173,7 @@ TEST(subprocess_run_spawn_failure) {
 #ifdef _WIN32
     SKIP_PLATFORM("POSIX exec semantics");
 #else
-    /* execv of a bogus path: fork succeeds, child _exit(127). We classify the
+    /* execvp of a bogus path: fork succeeds, child _exit(127). We classify the
      * reaped 127 as exit_nonzero — spawn_failed is reserved for fork() failing. */
     const char *argv[] = {"/nonexistent/cbm-bogus-binary", NULL};
     cbm_proc_opts_t opts = {0};
@@ -791,6 +813,7 @@ SUITE(subprocess) {
     RUN_TEST(subprocess_outcome_str);
     RUN_TEST(subprocess_run_clean);
     RUN_TEST(subprocess_run_exit_nonzero);
+    RUN_TEST(subprocess_run_resolves_literal_binary_name_from_path);
     RUN_TEST(subprocess_run_crash_is_crash);
     RUN_TEST(subprocess_run_hang_is_hang);
     RUN_TEST(subprocess_run_spawn_failure);

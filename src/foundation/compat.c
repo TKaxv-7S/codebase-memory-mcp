@@ -112,8 +112,7 @@ int cbm_mkstemp(char *tmpl) {
     }
     if (!_mktemp(buf))
         return CBM_NOT_FOUND;
-    int fd =
-        _open(buf, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
+    int fd = _open(buf, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
     if (fd >= 0)
         strcpy(tmpl, buf);
     return fd;

@@ -114,9 +114,13 @@ jobs:
         shell: msys2 {0}
         run: |
           scripts/build.sh CC=clang CXX=clang++
-          BIN="$(pwd)/build/c/codebase-memory-mcp"
-          [ -f "${BIN}.exe" ] && BIN="${BIN}.exe"
-          scripts/smoke-test.sh "$BIN"
+          SMOKE_DIR="$(mktemp -d)"
+          trap 'rm -rf "$SMOKE_DIR"' EXIT
+          cp build/c/codebase-memory-mcp-launcher.exe \
+            "$SMOKE_DIR/codebase-memory-mcp.exe"
+          cp build/c/codebase-memory-mcp.exe \
+            "$SMOKE_DIR/codebase-memory-mcp.payload.exe"
+          scripts/smoke-test.sh "$SMOKE_DIR/codebase-memory-mcp.exe"
 
   ci-ok:
     # The one required context (besides dco) — fails unless every PR stage

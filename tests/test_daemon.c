@@ -144,8 +144,7 @@ TEST(daemon_shared_job_survives_until_final_subscriber_disconnects) {
     ASSERT_EQ(cbm_daemon_coordinator_state(c), CBM_DAEMON_COORDINATOR_RUNNING);
     ASSERT_EQ(cbm_daemon_active_jobs(c), 1);
     ASSERT_EQ(cbm_daemon_job_subscribers(c, "project-shared"), 0);
-    ASSERT_EQ(cbm_daemon_job_state(c, "project-shared"),
-              CBM_DAEMON_JOB_CANCEL_REQUESTED);
+    ASSERT_EQ(cbm_daemon_job_state(c, "project-shared"), CBM_DAEMON_JOB_CANCEL_REQUESTED);
     ASSERT_EQ(tracker.job_cancel_count, 1);
     ASSERT_EQ(tracker.shared_job_cancel_count, 1);
     ASSERT_EQ(tracker.unexpected_key_count, 0);
@@ -230,8 +229,7 @@ TEST(daemon_heartbeat_extends_lease_and_expiry_releases_connection) {
     ASSERT_FALSE(cbm_daemon_client_heartbeat(c, owner, 1451));
     ASSERT_FALSE(cbm_daemon_client_disconnected(c, owner, 1451));
     ASSERT_EQ(cbm_daemon_job_subscribers(c, "project-lease-job"), 0);
-    ASSERT_EQ(cbm_daemon_job_state(c, "project-lease-job"),
-              CBM_DAEMON_JOB_CANCEL_REQUESTED);
+    ASSERT_EQ(cbm_daemon_job_state(c, "project-lease-job"), CBM_DAEMON_JOB_CANCEL_REQUESTED);
     ASSERT_EQ(cbm_daemon_active_jobs(c), 1);
     ASSERT_EQ(cbm_daemon_active_watches(c), 0);
     ASSERT_EQ(tracker.job_cancel_count, 1);
@@ -259,9 +257,8 @@ TEST(daemon_last_client_stops_immediately_and_releases_owned_work) {
     ASSERT_EQ(cbm_daemon_coordinator_state(c), CBM_DAEMON_COORDINATOR_RUNNING);
     ASSERT_EQ(cbm_daemon_job_subscribe(c, client, "project-shutdown-job", &job_subscription),
               CBM_DAEMON_SUBSCRIPTION_STARTED);
-    ASSERT_EQ(
-        cbm_daemon_watch_subscribe(c, client, "project-shutdown-watch", &watch_subscription),
-        CBM_DAEMON_SUBSCRIPTION_STARTED);
+    ASSERT_EQ(cbm_daemon_watch_subscribe(c, client, "project-shutdown-watch", &watch_subscription),
+              CBM_DAEMON_SUBSCRIPTION_STARTED);
     ASSERT_NEQ(job_subscription, CBM_DAEMON_SUBSCRIPTION_ID_INVALID);
     ASSERT_NEQ(watch_subscription, CBM_DAEMON_SUBSCRIPTION_ID_INVALID);
     ASSERT_EQ(cbm_daemon_active_jobs(c), 1);
@@ -274,8 +271,7 @@ TEST(daemon_last_client_stops_immediately_and_releases_owned_work) {
     ASSERT_EQ(cbm_daemon_active_jobs(c), 1);
     ASSERT_EQ(cbm_daemon_active_watches(c), 0);
     ASSERT_EQ(cbm_daemon_job_subscribers(c, "project-shutdown-job"), 0);
-    ASSERT_EQ(cbm_daemon_job_state(c, "project-shutdown-job"),
-              CBM_DAEMON_JOB_CANCEL_REQUESTED);
+    ASSERT_EQ(cbm_daemon_job_state(c, "project-shutdown-job"), CBM_DAEMON_JOB_CANCEL_REQUESTED);
     ASSERT_EQ(cbm_daemon_watch_subscribers(c, "project-shutdown-watch"), 0);
     ASSERT_EQ(tracker.job_cancel_count, 1);
     ASSERT_EQ(tracker.shutdown_job_cancel_count, 1);

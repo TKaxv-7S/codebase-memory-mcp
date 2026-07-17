@@ -34,6 +34,46 @@ bool cbm_macos_extended_acl_fd_is_empty(int fd) {
     return entry_result == -1 && entry_error == EINVAL && free_result == 0;
 }
 
+bool cbm_macos_extended_acl_fd_is_deny_only(int fd) {
+    if (fd < 0) {
+        return false;
+    }
+
+    errno = 0;
+    acl_t acl = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
+    if (!acl) {
+        /* As with the empty predicate, ENOENT is Darwin's ACL-less result on
+         * some filesystems. Retrieval errors other than ENOENT are unsafe. */
+        return errno == ENOENT;
+    }
+
+    bool safe = true;
+    acl_entry_t entry = NULL;
+    int entry_id = ACL_FIRST_ENTRY;
+    for (;;) {
+        errno = 0;
+        int entry_result = acl_get_entry(acl, entry_id, &entry);
+        int entry_error = errno;
+        if (entry_result == -1) {
+            safe = entry_error == EINVAL;
+            break;
+        }
+        if (entry_result != 0 || !entry) {
+            safe = false;
+            break;
+        }
+        acl_tag_t tag = (acl_tag_t)0;
+        if (acl_get_tag_type(entry, &tag) != 0 || tag != ACL_EXTENDED_DENY) {
+            safe = false;
+            break;
+        }
+        entry_id = ACL_NEXT_ENTRY;
+    }
+
+    int free_result = acl_free(acl);
+    return safe && free_result == 0;
+}
+
 bool cbm_macos_extended_acl_fd_clear(int fd) {
     if (fd < 0) {
         return false;
@@ -50,6 +90,10 @@ bool cbm_macos_extended_acl_fd_clear(int fd) {
 #else
 
 bool cbm_macos_extended_acl_fd_is_empty(int fd) {
+    return fd >= 0;
+}
+
+bool cbm_macos_extended_acl_fd_is_deny_only(int fd) {
     return fd >= 0;
 }
 

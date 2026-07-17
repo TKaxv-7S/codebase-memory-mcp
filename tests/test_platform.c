@@ -197,20 +197,20 @@ TEST(platform_path_helpers_use_per_thread_storage) {
         {.ready = &ready, .release = &release},
     };
     cbm_thread_t threads[2];
-    bool started0 = cbm_thread_create(&threads[0], 0, platform_capture_path_buffers,
-                                      &results[0]) == 0;
-    bool started1 = cbm_thread_create(&threads[1], 0, platform_capture_path_buffers,
-                                      &results[1]) == 0;
+    bool started0 =
+        cbm_thread_create(&threads[0], 0, platform_capture_path_buffers, &results[0]) == 0;
+    bool started1 =
+        cbm_thread_create(&threads[1], 0, platform_capture_path_buffers, &results[1]) == 0;
     for (int spins = 0; started0 && started1 && spins < 5000 &&
                         atomic_load_explicit(&ready, memory_order_acquire) < 2;
          spins++) {
         cbm_usleep(1000);
     }
     bool both_ready = atomic_load_explicit(&ready, memory_order_acquire) == 2;
-    bool separate_home = both_ready && results[0].home && results[1].home &&
-                         results[0].home != results[1].home;
-    bool separate_cache = both_ready && results[0].cache && results[1].cache &&
-                          results[0].cache != results[1].cache;
+    bool separate_home =
+        both_ready && results[0].home && results[1].home && results[0].home != results[1].home;
+    bool separate_cache =
+        both_ready && results[0].cache && results[1].cache && results[0].cache != results[1].cache;
     atomic_store_explicit(&release, 1, memory_order_release);
     if (started0) {
         (void)cbm_thread_join(&threads[0]);
@@ -239,6 +239,67 @@ TEST(platform_path_helpers_use_per_thread_storage) {
     ASSERT_TRUE(separate_cache);
     PASS();
 }
+
+/* A configured cache root is an identity boundary. Truncating an oversized
+ * value and silently using the prefix would admit/log one root while placing
+ * data somewhere the user never selected. Reject it instead of falling back. */
+TEST(platform_cache_dir_rejects_truncated_override) {
+    const char *saved = getenv("CBM_CACHE_DIR");
+    char *saved_copy = saved ? strdup(saved) : NULL;
+    size_t length = 5000U;
+    char *value = malloc(length + 1U);
+    ASSERT_NOT_NULL(value);
+    memcpy(value, "/tmp/", 5U);
+    memset(value + 5U, 'a', length - 5U);
+    value[length] = '\0';
+    ASSERT_EQ(cbm_setenv("CBM_CACHE_DIR", value, 1), 0);
+
+    const char *resolved = cbm_resolve_cache_dir();
+
+    if (saved_copy) {
+        (void)cbm_setenv("CBM_CACHE_DIR", saved_copy, 1);
+    } else {
+        (void)cbm_unsetenv("CBM_CACHE_DIR");
+    }
+    free(saved_copy);
+    free(value);
+    ASSERT_NULL(resolved);
+    PASS();
+}
+
+#ifdef _WIN32
+/* cbm_safe_getenv reads Windows' wide environment as UTF-8. Its matching
+ * setter must update that same wide environment; _putenv_s alone interprets
+ * UTF-8 path bytes through the active ANSI code page. */
+TEST(platform_setenv_preserves_utf8_in_wide_environment) {
+    static const char utf8[] = "C:/cbm-cache-\xce\x94-\xe6\x97\xa5\xe6\x9c\xac";
+    static const wchar_t wide[] = L"C:/cbm-cache-\u0394-\u65e5\u672c";
+    ASSERT_EQ(cbm_setenv("CBM_CACHE_DIR", utf8, 1), 0);
+    wchar_t observed_wide[128];
+    ASSERT_EQ(GetEnvironmentVariableW(L"CBM_CACHE_DIR", observed_wide, 128), (DWORD)(wcslen(wide)));
+    ASSERT_EQ(wcscmp(observed_wide, wide), 0);
+    char observed_utf8[128];
+    ASSERT_NOT_NULL(cbm_safe_getenv("CBM_CACHE_DIR", observed_utf8, sizeof(observed_utf8), NULL));
+    ASSERT_STR_EQ(observed_utf8, utf8);
+    (void)cbm_unsetenv("CBM_CACHE_DIR");
+    PASS();
+}
+
+/* Empty and absent variables have different fallback semantics. In
+ * particular, an explicitly empty CBM_CACHE_DIR means "use the default"; it
+ * must not be misreported as a failed wide-environment read. Unset is also
+ * required to stay idempotent because test and process cleanup call it after
+ * partially initialized paths. */
+TEST(platform_windows_empty_environment_is_read_and_unset_idempotently) {
+    ASSERT_EQ(cbm_setenv("CBM_CACHE_DIR", "", 1), 0);
+    char observed[8] = "sentinel";
+    ASSERT_NOT_NULL(cbm_safe_getenv("CBM_CACHE_DIR", observed, sizeof(observed), "fallback"));
+    ASSERT_STR_EQ(observed, "");
+    ASSERT_EQ(cbm_unsetenv("CBM_CACHE_DIR"), 0);
+    ASSERT_EQ(cbm_unsetenv("CBM_CACHE_DIR"), 0);
+    PASS();
+}
+#endif
 
 /*
  * CBM_WORKERS env override for cbm_default_worker_count.
@@ -483,6 +544,11 @@ SUITE(platform) {
     RUN_TEST(platform_mmap);
     RUN_TEST(platform_mmap_nonexistent);
     RUN_TEST(platform_path_helpers_use_per_thread_storage);
+    RUN_TEST(platform_cache_dir_rejects_truncated_override);
+#ifdef _WIN32
+    RUN_TEST(platform_setenv_preserves_utf8_in_wide_environment);
+    RUN_TEST(platform_windows_empty_environment_is_read_and_unset_idempotently);
+#endif
     RUN_TEST(platform_default_workers_env_override);
     RUN_TEST(platform_default_workers_env_invalid);
     RUN_TEST(platform_default_workers_env_unset);

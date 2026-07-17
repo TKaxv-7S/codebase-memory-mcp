@@ -5626,8 +5626,7 @@ static void cancel_at_publish_boundary(cbm_pipeline_t *p, const char *staging_pa
             cbm_store_t *staging = cbm_store_open_path(staging_path);
             if (staging) {
                 ctx->staging_was_valid = cbm_store_check_integrity(staging);
-                ctx->staged_candidates =
-                    count_nodes_named(staging, ctx->project, ctx->candidate);
+                ctx->staged_candidates = count_nodes_named(staging, ctx->project, ctx->candidate);
                 cbm_store_close(staging);
             }
         }
@@ -6122,8 +6121,7 @@ TEST(backup_failed_rename_failure_preserves_corrupt_main) {
     int rc = cbm_pipeline_run(p);
     cbm_pipeline_free(p);
 
-    bool final_preserved =
-        pipeline_fixture_file_equals(final_path, "corrupt-main-before-rename");
+    bool final_preserved = pipeline_fixture_file_equals(final_path, "corrupt-main-before-rename");
     (void)cbm_unlink(final_path);
     cleanup_incremental_repo();
 

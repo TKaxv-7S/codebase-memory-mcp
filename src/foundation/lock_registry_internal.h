@@ -23,8 +23,7 @@ size_t cbm_lock_registry_active_lease_count_for_test(cbm_lock_registry_t *regist
 size_t cbm_lock_registry_pending_cleanup_count_for_test(cbm_lock_registry_t *registry);
 bool cbm_lock_registry_is_retired_for_test(const cbm_lock_registry_t *registry);
 size_t cbm_lock_registry_attempting_waiter_count_for_test(cbm_lock_registry_t *registry);
-uint64_t cbm_lock_registry_condition_wait_call_count_for_test(
-    const cbm_lock_registry_t *registry);
+uint64_t cbm_lock_registry_condition_wait_call_count_for_test(const cbm_lock_registry_t *registry);
 size_t cbm_lock_registry_condition_waiter_count_for_test(const cbm_lock_registry_t *registry);
 
 typedef enum {

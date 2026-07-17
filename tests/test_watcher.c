@@ -343,8 +343,7 @@ TEST(watcher_prune_waits_for_daemon_project_mutation) {
     cbm_store_t *store = cbm_store_open_memory();
     cbm_watcher_t *w = cbm_watcher_new(store, index_callback, NULL);
     cbm_daemon_application_config_t config = {.watcher = w};
-    cbm_daemon_application_t *application =
-        cbm_daemon_application_new(&config);
+    cbm_daemon_application_t *application = cbm_daemon_application_new(&config);
     if (!store || !w || !application) {
         cbm_daemon_application_free(application);
         cbm_watcher_free(w);
@@ -358,8 +357,7 @@ TEST(watcher_prune_waits_for_daemon_project_mutation) {
     th_rmtree(f.rootdir);
 
     bool mutation_held =
-        cbm_daemon_application_project_mutation_try_begin(application,
-                                                          "stale-project");
+        cbm_daemon_application_project_mutation_try_begin(application, "stale-project");
     for (int miss = 0; mutation_held && miss < 3; miss++) {
         cbm_watcher_touch(w, "stale-project");
         cbm_watcher_poll_once(w);
@@ -377,10 +375,8 @@ TEST(watcher_prune_waits_for_daemon_project_mutation) {
         cbm_watcher_touch(w, "stale-project");
         cbm_watcher_poll_once(w);
     }
-    bool pruned_after_release = cbm_watcher_watch_count(w) == 0 &&
-                                access(f.db_path, F_OK) != 0 &&
-                                access(f.wal_path, F_OK) != 0 &&
-                                access(f.shm_path, F_OK) != 0;
+    bool pruned_after_release = cbm_watcher_watch_count(w) == 0 && access(f.db_path, F_OK) != 0 &&
+                                access(f.wal_path, F_OK) != 0 && access(f.shm_path, F_OK) != 0;
 
     cbm_daemon_application_free(application);
     cbm_watcher_free(w);
@@ -402,9 +398,8 @@ TEST(watcher_prune_guard_denial_and_success_are_balanced) {
     cbm_store_t *store = cbm_store_open_memory();
     cbm_watcher_t *w = cbm_watcher_new(store, index_callback, NULL);
     prune_guard_probe_t probe = {0};
-    cbm_watcher_set_project_mutation_guard(
-        w, prune_guard_probe_begin, prune_guard_probe_end,
-        prune_guard_probe_pruned, &probe);
+    cbm_watcher_set_project_mutation_guard(w, prune_guard_probe_begin, prune_guard_probe_end,
+                                           prune_guard_probe_pruned, &probe);
     cbm_watcher_watch(w, "stale-project", f.rootdir);
     cbm_watcher_poll_once(w);
     th_rmtree(f.rootdir);
@@ -412,16 +407,14 @@ TEST(watcher_prune_guard_denial_and_success_are_balanced) {
         cbm_watcher_touch(w, "stale-project");
         cbm_watcher_poll_once(w);
     }
-    bool denied_preserved = cbm_watcher_watch_count(w) == 1 &&
-                            access(f.db_path, F_OK) == 0 && probe.begins == 1 &&
-                            probe.ends == 0 && probe.pruned == 0;
+    bool denied_preserved = cbm_watcher_watch_count(w) == 1 && access(f.db_path, F_OK) == 0 &&
+                            probe.begins == 1 && probe.ends == 0 && probe.pruned == 0;
 
     probe.allow = true;
     cbm_watcher_touch(w, "stale-project");
     cbm_watcher_poll_once(w);
-    bool success_balanced = cbm_watcher_watch_count(w) == 0 &&
-                            access(f.db_path, F_OK) != 0 && probe.begins == 2 &&
-                            probe.ends == 1 && probe.pruned == 1;
+    bool success_balanced = cbm_watcher_watch_count(w) == 0 && access(f.db_path, F_OK) != 0 &&
+                            probe.begins == 2 && probe.ends == 1 && probe.pruned == 1;
 
     cbm_watcher_set_project_mutation_guard(w, NULL, NULL, NULL, NULL);
     cbm_watcher_free(w);
@@ -444,9 +437,8 @@ TEST(watcher_prune_restats_root_after_guard_acquisition) {
         .allow = true,
         .restore_root = true,
     };
-    cbm_watcher_set_project_mutation_guard(
-        w, prune_guard_probe_begin, prune_guard_probe_end,
-        prune_guard_probe_pruned, &probe);
+    cbm_watcher_set_project_mutation_guard(w, prune_guard_probe_begin, prune_guard_probe_end,
+                                           prune_guard_probe_pruned, &probe);
     cbm_watcher_watch(w, "stale-project", f.rootdir);
     cbm_watcher_poll_once(w);
     th_rmtree(f.rootdir);
@@ -456,9 +448,8 @@ TEST(watcher_prune_restats_root_after_guard_acquisition) {
     }
 
     bool restored = access(f.rootdir, F_OK) == 0;
-    bool retained = cbm_watcher_watch_count(w) == 1 &&
-                    access(f.db_path, F_OK) == 0 && access(f.wal_path, F_OK) == 0 &&
-                    access(f.shm_path, F_OK) == 0;
+    bool retained = cbm_watcher_watch_count(w) == 1 && access(f.db_path, F_OK) == 0 &&
+                    access(f.wal_path, F_OK) == 0 && access(f.shm_path, F_OK) == 0;
     bool balanced = probe.begins == 1 && probe.ends == 1 && probe.pruned == 0;
     cbm_watcher_set_project_mutation_guard(w, NULL, NULL, NULL, NULL);
     cbm_watcher_free(w);
@@ -484,15 +475,13 @@ TEST(watcher_prune_delete_failure_retains_watch_for_retry) {
     /* A directory at the main DB path makes unlink fail deterministically on
      * POSIX and Windows. The watcher must remain registered for a later retry
      * and must not delete recoverable sidecars after that failure. */
-    bool failure_ready = cbm_unlink(f.db_path) == 0 &&
-                         cbm_mkdir_p(f.db_path, 0755);
+    bool failure_ready = cbm_unlink(f.db_path) == 0 && cbm_mkdir_p(f.db_path, 0755);
     for (int miss = 0; failure_ready && miss < 3; miss++) {
         cbm_watcher_touch(w, "stale-project");
         cbm_watcher_poll_once(w);
     }
     bool watch_retained = cbm_watcher_watch_count(w) == 1;
-    bool artifacts_retained = access(f.db_path, F_OK) == 0 &&
-                              access(f.wal_path, F_OK) == 0 &&
+    bool artifacts_retained = access(f.db_path, F_OK) == 0 && access(f.wal_path, F_OK) == 0 &&
                               access(f.shm_path, F_OK) == 0;
 
     cbm_watcher_free(w);
@@ -2209,8 +2198,14 @@ TEST(watcher_callback_data_passed) {
     if (!cbm_mkdtemp(tmpdir))
         FAIL("cbm_mkdtemp failed");
 
-    if (wt_git(tmpdir, "init -q") != 0) { th_rmtree(tmpdir); FAIL("git init failed"); }
-    { char p[300]; th_write_file(wt_path(p, sizeof(p), tmpdir, "file.txt"), "hello\n"); }
+    if (wt_git(tmpdir, "init -q") != 0) {
+        th_rmtree(tmpdir);
+        FAIL("git init failed");
+    }
+    {
+        char p[300];
+        th_write_file(wt_path(p, sizeof(p), tmpdir, "file.txt"), "hello\n");
+    }
     wt_git(tmpdir, "add file.txt");
     wt_git(tmpdir, "commit -q -m init");
 

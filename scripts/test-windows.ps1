@@ -18,6 +18,8 @@
                       * test_hook_augment.py      guards #618      (fixed by #619)
                       * test_ui_drive_listing.py  guards #548      (roots field)
                       * test_cli_non_ascii_arg.py guards #423/#20  (wide-argv main())
+                      * test_windows_launcher.py guards the permanent launcher,
+                        managed layout, portable refusal, and crash containment
 
       KNOWN REDS  - genuine, still-open Windows bugs reproduced at the product
                     surface. They are EXPECTED to be RED (exit 1) and are opt-in
@@ -37,8 +39,13 @@
     AddressSanitizer/UBSan (Linux containers, WSL), prefer scripts/test.sh.
 
 .PARAMETER Binary
-    Path to an existing codebase-memory-mcp.exe. If omitted, the script builds it
-    (target selected by -Target) into build/c/.
+    Path to an existing portable payload executable. If omitted, the script
+    builds it (target selected by -Target) into build/c/.
+
+.PARAMETER Launcher
+    Path to the permanent launcher executable. If omitted, the script uses
+    build/c/codebase-memory-mcp-launcher.exe, building target cbm-launcher when
+    needed.
 
 .PARAMETER Target
     Makefile.cbm target used when building: 'cbm-with-ui' (default; needed for the
@@ -60,6 +67,7 @@
 [CmdletBinding()]
 param(
     [string]$Binary,
+    [string]$Launcher,
     [ValidateSet("cbm-with-ui", "cbm")]
     [string]$Target = "cbm-with-ui",
     [switch]$GuardsOnly,
@@ -93,8 +101,34 @@ function Resolve-Binary {
     return $built
 }
 
+function Resolve-Launcher {
+    param([string]$Explicit)
+    if ($Explicit) { return (Resolve-Path $Explicit).Path }
+    $built = Join-Path $repoRoot "build\c\codebase-memory-mcp-launcher.exe"
+    if (Test-Path $built) { return $built }
+    Write-Host "Building permanent launcher via Makefile.cbm ..." -ForegroundColor Cyan
+    & $Make "-j" "-f" "Makefile.cbm" "cbm-launcher" "SANITIZE=" "TMP=$tmp" "TEMP=$tmp" "TMPDIR=$tmp"
+    if ($LASTEXITCODE -ne 0) { throw "launcher build failed (exit $LASTEXITCODE)" }
+    if (-not (Test-Path $built)) { throw "launcher not produced at $built" }
+    return $built
+}
+
+function Resolve-AbiMismatchLauncher {
+    $built = Join-Path $repoRoot "build\c\codebase-memory-mcp-launcher-abi2.exe"
+    if (Test-Path $built) { return $built }
+    Write-Host "Building launcher ABI mismatch fixture via Makefile.cbm ..." -ForegroundColor Cyan
+    & $Make "-j" "-f" "Makefile.cbm" "build/c/codebase-memory-mcp-launcher-abi2.exe" "SANITIZE=" "TMP=$tmp" "TEMP=$tmp" "TMPDIR=$tmp"
+    if ($LASTEXITCODE -ne 0) { throw "launcher ABI fixture build failed (exit $LASTEXITCODE)" }
+    if (-not (Test-Path $built)) { throw "launcher ABI fixture not produced at $built" }
+    return $built
+}
+
 $bin = Resolve-Binary -Explicit $Binary
-Write-Host "Binary: $bin" -ForegroundColor Green
+$launcherBin = Resolve-Launcher -Explicit $Launcher
+$abiMismatchLauncher = Resolve-AbiMismatchLauncher
+Write-Host "Payload: $bin" -ForegroundColor Green
+Write-Host "Launcher: $launcherBin" -ForegroundColor Green
+Write-Host "ABI mismatch fixture: $abiMismatchLauncher" -ForegroundColor Green
 
 $env:PYTHONUTF8 = "1"           # encode argv/stdio as UTF-8
 $env:CBM_INDEX_SUPERVISOR = "0" # in-process indexing (see .DESCRIPTION)
@@ -108,7 +142,8 @@ $guards = @(
     "tests\windows\test_non_ascii_cache_dump.py",
     "tests\windows\test_hook_augment.py",
     "tests\windows\test_ui_drive_listing.py",
-    "tests\windows\test_cli_non_ascii_arg.py"
+    "tests\windows\test_cli_non_ascii_arg.py",
+    "tests\windows\test_windows_launcher.py"
 )
 
 # Opt-in known-red repros - EXPECTED red (exit 1); never gate CI. Currently empty:
@@ -122,7 +157,11 @@ $fixedKeepers = @()
 Write-Host "`n--- Green guards ---" -ForegroundColor Cyan
 foreach ($t in $guards) {
     Write-Host "`n=== $t ===" -ForegroundColor Cyan
-    & $py $t $bin
+    if ($t -eq "tests\windows\test_windows_launcher.py") {
+        & $py $t $launcherBin $bin $abiMismatchLauncher
+    } else {
+        & $py $t $bin
+    }
     $code = $LASTEXITCODE
     if ($code -eq 0) {
         Write-Host "GREEN ($t)" -ForegroundColor Green

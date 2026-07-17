@@ -162,6 +162,10 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Test npm wrapper failure handling
+        working-directory: pkg/npm
+        run: npm test
+
       - name: Build product binary with embedded UI
         shell: msys2 {0}
         # --with-ui builds the frontend (npm) and embeds it, so the drive-picker

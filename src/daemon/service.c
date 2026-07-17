@@ -20,16 +20,15 @@
 enum {
     DAEMON_SERVICE_PATH_CAP = 4096,
     DAEMON_SERVICE_IO_CAP = 64 * 1024,
-    DAEMON_SERVICE_ESCAPED_VERSION_CAP =
-        (CBM_DAEMON_VERSION_TEXT_SIZE - 1) * 6 + 1,
+    DAEMON_SERVICE_ESCAPED_VERSION_CAP = (CBM_DAEMON_VERSION_TEXT_SIZE - 1) * 6 + 1,
     DAEMON_SERVICE_LOG_RECORD_CAP = 1536,
 };
 
 static cbm_daemon_conflict_log_test_hook_fn g_conflict_log_test_hook;
 static void *g_conflict_log_test_context;
 
-void cbm_daemon_conflict_log_set_test_hook(
-    cbm_daemon_conflict_log_test_hook_fn hook, void *context) {
+void cbm_daemon_conflict_log_set_test_hook(cbm_daemon_conflict_log_test_hook_fn hook,
+                                           void *context) {
     g_conflict_log_test_context = context;
     g_conflict_log_test_hook = hook;
 }
@@ -87,15 +86,19 @@ static bool fingerprint_valid(const char *fingerprint) {
     return true;
 }
 
+static bool optional_fingerprint_valid(const char *fingerprint) {
+    return !fingerprint || !fingerprint[0] || fingerprint_valid(fingerprint);
+}
+
 static bool identity_valid(const cbm_daemon_build_identity_t *identity) {
     return identity && version_valid(identity->semantic_version) &&
-           fingerprint_valid(identity->build_fingerprint) && identity->protocol_abi != 0 &&
+           fingerprint_valid(identity->build_fingerprint) &&
+           optional_fingerprint_valid(identity->cache_fingerprint) && identity->protocol_abi != 0 &&
            identity->store_abi != 0 && identity->feature_abi != 0;
 }
 
 static bool conflict_status_valid(cbm_daemon_hello_status_t status) {
-    return status >= CBM_DAEMON_HELLO_VERSION_CONFLICT &&
-           status <= CBM_DAEMON_HELLO_FEATURE_ABI_CONFLICT;
+    return status >= CBM_DAEMON_HELLO_VERSION_CONFLICT && status <= CBM_DAEMON_HELLO_CACHE_CONFLICT;
 }
 
 static bool conflict_valid(const cbm_daemon_conflict_t *conflict) {
@@ -103,23 +106,28 @@ static bool conflict_valid(const cbm_daemon_conflict_t *conflict) {
            version_valid(conflict->active_version) &&
            fingerprint_valid(conflict->active_build_fingerprint) &&
            version_valid(conflict->requested_version) &&
-           fingerprint_valid(conflict->requested_build_fingerprint);
+           fingerprint_valid(conflict->requested_build_fingerprint) &&
+           (conflict->status != CBM_DAEMON_HELLO_CACHE_CONFLICT ||
+            (fingerprint_valid(conflict->active_cache_fingerprint) &&
+             fingerprint_valid(conflict->requested_cache_fingerprint)));
 }
 
 static const char *conflict_reason(cbm_daemon_hello_status_t status) {
     switch (status) {
-        case CBM_DAEMON_HELLO_VERSION_CONFLICT:
-            return "version";
-        case CBM_DAEMON_HELLO_BUILD_CONFLICT:
-            return "build";
-        case CBM_DAEMON_HELLO_PROTOCOL_ABI_CONFLICT:
-            return "protocol_abi";
-        case CBM_DAEMON_HELLO_STORE_ABI_CONFLICT:
-            return "store_abi";
-        case CBM_DAEMON_HELLO_FEATURE_ABI_CONFLICT:
-            return "feature_abi";
-        default:
-            return NULL;
+    case CBM_DAEMON_HELLO_VERSION_CONFLICT:
+        return "version";
+    case CBM_DAEMON_HELLO_BUILD_CONFLICT:
+        return "build";
+    case CBM_DAEMON_HELLO_PROTOCOL_ABI_CONFLICT:
+        return "protocol_abi";
+    case CBM_DAEMON_HELLO_STORE_ABI_CONFLICT:
+        return "store_abi";
+    case CBM_DAEMON_HELLO_FEATURE_ABI_CONFLICT:
+        return "feature_abi";
+    case CBM_DAEMON_HELLO_CACHE_CONFLICT:
+        return "cache_root";
+    default:
+        return NULL;
     }
 }
 
@@ -153,10 +161,9 @@ bool cbm_daemon_rendezvous_key(char out[CBM_DAEMON_KEY_SIZE]) {
     return true;
 }
 
-cbm_daemon_hello_status_t
-cbm_daemon_hello_compare(const cbm_daemon_build_identity_t *active,
-                         const cbm_daemon_build_identity_t *requested,
-                         cbm_daemon_conflict_t *conflict_out) {
+cbm_daemon_hello_status_t cbm_daemon_hello_compare(const cbm_daemon_build_identity_t *active,
+                                                   const cbm_daemon_build_identity_t *requested,
+                                                   cbm_daemon_conflict_t *conflict_out) {
     if (conflict_out) {
         memset(conflict_out, 0, sizeof(*conflict_out));
         conflict_out->status = CBM_DAEMON_HELLO_INVALID;
@@ -168,13 +175,22 @@ cbm_daemon_hello_compare(const cbm_daemon_build_identity_t *active,
     (void)snprintf(conflict_out->active_version, sizeof(conflict_out->active_version), "%s",
                    active->semantic_version);
     (void)snprintf(conflict_out->active_build_fingerprint,
-                   sizeof(conflict_out->active_build_fingerprint), "%s",
-                   active->build_fingerprint);
+                   sizeof(conflict_out->active_build_fingerprint), "%s", active->build_fingerprint);
     (void)snprintf(conflict_out->requested_version, sizeof(conflict_out->requested_version), "%s",
                    requested->semantic_version);
     (void)snprintf(conflict_out->requested_build_fingerprint,
                    sizeof(conflict_out->requested_build_fingerprint), "%s",
                    requested->build_fingerprint);
+    if (active->cache_fingerprint) {
+        (void)snprintf(conflict_out->active_cache_fingerprint,
+                       sizeof(conflict_out->active_cache_fingerprint), "%s",
+                       active->cache_fingerprint);
+    }
+    if (requested->cache_fingerprint) {
+        (void)snprintf(conflict_out->requested_cache_fingerprint,
+                       sizeof(conflict_out->requested_cache_fingerprint), "%s",
+                       requested->cache_fingerprint);
+    }
 
     cbm_daemon_hello_status_t status = CBM_DAEMON_HELLO_COMPATIBLE;
     if (strcmp(active->semantic_version, requested->semantic_version) != 0) {
@@ -192,8 +208,7 @@ cbm_daemon_hello_compare(const cbm_daemon_build_identity_t *active,
     return status;
 }
 
-bool cbm_daemon_conflict_format(const cbm_daemon_conflict_t *conflict, char *out,
-                                size_t out_size) {
+bool cbm_daemon_conflict_format(const cbm_daemon_conflict_t *conflict, char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
     }
@@ -202,13 +217,23 @@ bool cbm_daemon_conflict_format(const cbm_daemon_conflict_t *conflict, char *out
     if (!reason || !conflict_valid(conflict)) {
         return false;
     }
-    int written = snprintf(
-        out, out_size,
-        "CBM could not start because a conflicting CBM process is active "
-        "(%s; active version %s, build %s; requested version %s, build %s). "
-        "Close all CBM sessions and commands, then retry.",
-        reason, conflict->active_version, conflict->active_build_fingerprint,
-        conflict->requested_version, conflict->requested_build_fingerprint);
+    int written;
+    if (conflict->status == CBM_DAEMON_HELLO_CACHE_CONFLICT) {
+        written =
+            snprintf(out, out_size,
+                     "CBM could not start because the active account daemon uses a "
+                     "different cache directory (active cache %s; requested cache %s). "
+                     "Close all CBM sessions and commands, then retry with one "
+                     "consistent CBM_CACHE_DIR.",
+                     conflict->active_cache_fingerprint, conflict->requested_cache_fingerprint);
+    } else {
+        written = snprintf(out, out_size,
+                           "CBM could not start because a conflicting CBM process is active "
+                           "(%s; active version %s, build %s; requested version %s, build %s). "
+                           "Close all CBM sessions and commands, then retry.",
+                           reason, conflict->active_version, conflict->active_build_fingerprint,
+                           conflict->requested_version, conflict->requested_build_fingerprint);
+    }
     if (written < 0 || (size_t)written >= out_size) {
         out[0] = '\0';
         return false;
@@ -216,12 +241,10 @@ bool cbm_daemon_conflict_format(const cbm_daemon_conflict_t *conflict, char *out
     return true;
 }
 
-static bool json_escape_version(const char *value,
-                                char out[DAEMON_SERVICE_ESCAPED_VERSION_CAP]) {
+static bool json_escape_version(const char *value, char out[DAEMON_SERVICE_ESCAPED_VERSION_CAP]) {
     static const char hex[] = "0123456789abcdef";
     size_t length = 0;
-    if (!version_valid(value) ||
-        !bounded_length(value, CBM_DAEMON_VERSION_TEXT_SIZE, &length)) {
+    if (!version_valid(value) || !bounded_length(value, CBM_DAEMON_VERSION_TEXT_SIZE, &length)) {
         return false;
     }
     size_t used = 0;
@@ -268,14 +291,27 @@ static bool conflict_log_record(const cbm_daemon_conflict_t *conflict,
     if (timestamp == (time_t)-1) {
         return false;
     }
-    int written = snprintf(
-        out, DAEMON_SERVICE_LOG_RECORD_CAP,
-        "{\"event\":\"daemon.version_conflict\",\"timestamp_unix_s\":%lld,"
-        "\"reason\":\"%s\","
-        "\"active_version\":\"%s\",\"active_build\":\"%s\","
-        "\"requested_version\":\"%s\",\"requested_build\":\"%s\"}\n",
-        (long long)timestamp, reason, active, conflict->active_build_fingerprint, requested,
-        conflict->requested_build_fingerprint);
+    int written;
+    if (conflict->status == CBM_DAEMON_HELLO_CACHE_CONFLICT) {
+        written = snprintf(out, DAEMON_SERVICE_LOG_RECORD_CAP,
+                           "{\"event\":\"daemon.version_conflict\",\"timestamp_unix_s\":%lld,"
+                           "\"reason\":\"%s\",\"active_cache\":\"%s\","
+                           "\"requested_cache\":\"%s\",\"active_version\":\"%s\","
+                           "\"active_build\":\"%s\",\"requested_version\":\"%s\","
+                           "\"requested_build\":\"%s\"}\n",
+                           (long long)timestamp, reason, conflict->active_cache_fingerprint,
+                           conflict->requested_cache_fingerprint, active,
+                           conflict->active_build_fingerprint, requested,
+                           conflict->requested_build_fingerprint);
+    } else {
+        written = snprintf(out, DAEMON_SERVICE_LOG_RECORD_CAP,
+                           "{\"event\":\"daemon.version_conflict\",\"timestamp_unix_s\":%lld,"
+                           "\"reason\":\"%s\","
+                           "\"active_version\":\"%s\",\"active_build\":\"%s\","
+                           "\"requested_version\":\"%s\",\"requested_build\":\"%s\"}\n",
+                           (long long)timestamp, reason, active, conflict->active_build_fingerprint,
+                           requested, conflict->requested_build_fingerprint);
+    }
     if (written < 0 || written >= DAEMON_SERVICE_LOG_RECORD_CAP) {
         return false;
     }
@@ -319,9 +355,8 @@ static bool fd_regular(int fd, struct stat *status_out) {
     return true;
 }
 
-bool cbm_daemon_build_fingerprint_native_file(
-    uintptr_t native_file,
-    char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
+bool cbm_daemon_build_fingerprint_native_file(uintptr_t native_file,
+                                              char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
     if (!out) {
         return false;
     }
@@ -342,9 +377,7 @@ bool cbm_daemon_build_fingerprint_native_file(
     bool ok = true;
     while (offset < before.st_size) {
         off_t remaining = before.st_size - offset;
-        size_t request = remaining < (off_t)sizeof(buffer)
-                             ? (size_t)remaining
-                             : sizeof(buffer);
+        size_t request = remaining < (off_t)sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
         ssize_t count = pread(fd, buffer, request, offset);
         if (count > 0) {
             cbm_sha256_update(&context, buffer, (size_t)count);
@@ -370,8 +403,8 @@ bool cbm_daemon_build_fingerprint_native_file(
     return true;
 }
 
-bool cbm_daemon_build_fingerprint_file(
-    const char *path, char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
+bool cbm_daemon_build_fingerprint_file(const char *path,
+                                       char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
     if (!out) {
         return false;
     }
@@ -381,8 +414,8 @@ bool cbm_daemon_build_fingerprint_file(
         return false;
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-    bool ok = fd >= 0 && fd_cloexec(fd) &&
-              cbm_daemon_build_fingerprint_native_file((uintptr_t)fd, out);
+    bool ok =
+        fd >= 0 && fd_cloexec(fd) && cbm_daemon_build_fingerprint_native_file((uintptr_t)fd, out);
     if (fd >= 0 && close(fd) != 0) {
         ok = false;
     }
@@ -441,9 +474,9 @@ static bool posix_log_path_open(const char *log_path, posix_log_path_t *path) {
     }
     path->dir_fd = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     struct stat parent_status;
-    if (path->dir_fd < 0 || !fd_cloexec(path->dir_fd) ||
-        fstat(path->dir_fd, &parent_status) != 0 || !S_ISDIR(parent_status.st_mode) ||
-        parent_status.st_uid != geteuid() || (parent_status.st_mode & 0022) != 0) {
+    if (path->dir_fd < 0 || !fd_cloexec(path->dir_fd) || fstat(path->dir_fd, &parent_status) != 0 ||
+        !S_ISDIR(parent_status.st_mode) || parent_status.st_uid != geteuid() ||
+        (parent_status.st_mode & 0022) != 0) {
         posix_log_path_close(path);
         return false;
     }
@@ -462,9 +495,8 @@ static int posix_lock_file_open(const posix_log_path_t *path, bool *created_out)
     if (fd < 0 || !fd_cloexec(fd) || !fd_regular_current_user(fd, &status) ||
         fchmod(fd, 0600) != 0 ||
         fstatat(path->dir_fd, path->lock, &by_path, AT_SYMLINK_NOFOLLOW) != 0 ||
-        !S_ISREG(by_path.st_mode) || by_path.st_uid != geteuid() ||
-        by_path.st_nlink != 1 || status.st_dev != by_path.st_dev ||
-        status.st_ino != by_path.st_ino) {
+        !S_ISREG(by_path.st_mode) || by_path.st_uid != geteuid() || by_path.st_nlink != 1 ||
+        status.st_dev != by_path.st_dev || status.st_ino != by_path.st_ino) {
         if (fd >= 0) {
             (void)close(fd);
         }
@@ -635,15 +667,13 @@ static bool posix_log_append(const char *log_path, const char *record, size_t re
 
 static bool windows_same_file_identity(const BY_HANDLE_FILE_INFORMATION *first,
                                        const BY_HANDLE_FILE_INFORMATION *second) {
-    return first && second &&
-           first->dwVolumeSerialNumber == second->dwVolumeSerialNumber &&
+    return first && second && first->dwVolumeSerialNumber == second->dwVolumeSerialNumber &&
            first->nFileIndexHigh == second->nFileIndexHigh &&
            first->nFileIndexLow == second->nFileIndexLow;
 }
 
-bool cbm_daemon_build_fingerprint_native_file(
-    uintptr_t native_file,
-    char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
+bool cbm_daemon_build_fingerprint_native_file(uintptr_t native_file,
+                                              char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
     if (!out) {
         return false;
     }
@@ -653,21 +683,20 @@ bool cbm_daemon_build_fingerprint_native_file(
         return false;
     }
     BY_HANDLE_FILE_INFORMATION original_info;
-    HANDLE file = ReOpenFile(original, GENERIC_READ,
-                             FILE_SHARE_READ | FILE_SHARE_DELETE,
+    HANDLE file = ReOpenFile(original, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                              FILE_FLAG_SEQUENTIAL_SCAN);
     BY_HANDLE_FILE_INFORMATION info;
     LARGE_INTEGER before;
-    bool ok = GetFileType(original) == FILE_TYPE_DISK &&
-              GetFileInformationByHandle(original, &original_info) != 0 &&
-              (original_info.dwFileAttributes &
-               (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
-              file != INVALID_HANDLE_VALUE && GetFileType(file) == FILE_TYPE_DISK &&
-              GetFileInformationByHandle(file, &info) != 0 &&
-              (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ==
-                  0 &&
-              windows_same_file_identity(&original_info, &info) &&
-              GetFileSizeEx(file, &before) != 0 && before.QuadPart >= 0;
+    bool ok =
+        GetFileType(original) == FILE_TYPE_DISK &&
+        GetFileInformationByHandle(original, &original_info) != 0 &&
+        (original_info.dwFileAttributes &
+         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+        file != INVALID_HANDLE_VALUE && GetFileType(file) == FILE_TYPE_DISK &&
+        GetFileInformationByHandle(file, &info) != 0 &&
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+        windows_same_file_identity(&original_info, &info) && GetFileSizeEx(file, &before) != 0 &&
+        before.QuadPart >= 0;
     cbm_sha256_ctx context;
     cbm_sha256_init(&context);
     unsigned char buffer[DAEMON_SERVICE_IO_CAP];
@@ -687,8 +716,8 @@ bool cbm_daemon_build_fingerprint_native_file(
     BY_HANDLE_FILE_INFORMATION after_info;
     ok = ok && GetFileSizeEx(file, &after) != 0 &&
          GetFileInformationByHandle(file, &after_info) != 0 &&
-         windows_same_file_identity(&info, &after_info) &&
-         before.QuadPart == after.QuadPart && total == (uint64_t)after.QuadPart;
+         windows_same_file_identity(&info, &after_info) && before.QuadPart == after.QuadPart &&
+         total == (uint64_t)after.QuadPart;
     if (file != INVALID_HANDLE_VALUE) {
         (void)CloseHandle(file);
     }
@@ -701,8 +730,8 @@ bool cbm_daemon_build_fingerprint_native_file(
     return true;
 }
 
-bool cbm_daemon_build_fingerprint_file(
-    const char *path, char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
+bool cbm_daemon_build_fingerprint_file(const char *path,
+                                       char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]) {
     if (!out) {
         return false;
     }
@@ -715,9 +744,9 @@ bool cbm_daemon_build_fingerprint_file(
     if (!wide) {
         return false;
     }
-    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
-                              OPEN_EXISTING,
-                              FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    HANDLE file =
+        CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     free(wide);
     bool ok = file != INVALID_HANDLE_VALUE &&
               cbm_daemon_build_fingerprint_native_file((uintptr_t)file, out);
@@ -735,17 +764,17 @@ static bool windows_log_handle_valid(HANDLE file, LARGE_INTEGER *size_out) {
     return file != INVALID_HANDLE_VALUE && GetFileType(file) == FILE_TYPE_DISK &&
            GetFileInformationByHandle(file, &info) != 0 &&
            (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ==
-               0 && info.nNumberOfLinks == 1 &&
-           GetFileSizeEx(file, size_out) != 0 && size_out->QuadPart >= 0;
+               0 &&
+           info.nNumberOfLinks == 1 && GetFileSizeEx(file, size_out) != 0 &&
+           size_out->QuadPart >= 0;
 }
 
 static HANDLE windows_log_open(const wchar_t *path, LARGE_INTEGER *size_out) {
     /* windows_private_file_prepare creates or validates the file with IPC's
      * explicit protected current-user DACL before this handle is opened. */
-    HANDLE file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                              OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
-                              NULL);
+    HANDLE file =
+        CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (!windows_log_handle_valid(file, size_out)) {
         if (file != INVALID_HANDLE_VALUE) {
             (void)CloseHandle(file);
@@ -794,8 +823,7 @@ static bool windows_log_path_open(const char *log_path, windows_log_path_t *path
     path->base = slash + 1;
     *slash = '\0';
     size_t base_length = strlen(path->base);
-    int lock_written = snprintf(path->lock_base, sizeof(path->lock_base), "%s.lock",
-                                path->base);
+    int lock_written = snprintf(path->lock_base, sizeof(path->lock_base), "%s.lock", path->base);
     if (base_length == 0 || base_length > 248 || lock_written <= 0 ||
         (size_t)lock_written >= sizeof(path->lock_base)) {
         return false;
@@ -840,8 +868,7 @@ static HANDLE windows_lock_open(const wchar_t *path) {
             /* Read access is sufficient for LockFileEx. Keeping this handle
              * read-only makes it share-compatible with the brief DACL repair
              * handle, whose FILE_SHARE_READ still admits every live locker. */
-            path, GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+            path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
         if (file != INVALID_HANDLE_VALUE) {
             LARGE_INTEGER size;
@@ -899,15 +926,13 @@ static bool windows_log_append(const char *log_path, const char *record, size_t 
         conflict_log_test_hook(CBM_DAEMON_CONFLICT_LOG_BEFORE_SERIALIZATION_LOCK);
     }
     OVERLAPPED lock_range;
-    bool lock_acquired = lock != INVALID_HANDLE_VALUE &&
-                         windows_lock_exclusive(lock, &lock_range);
+    bool lock_acquired = lock != INVALID_HANDLE_VALUE && windows_lock_exclusive(lock, &lock_range);
     if (lock_acquired) {
         conflict_log_test_hook(CBM_DAEMON_CONFLICT_LOG_AFTER_SERIALIZATION_LOCK);
     }
 
     LARGE_INTEGER size;
-    bool ok = lock_acquired &&
-              windows_private_file_prepare(path.storage, path.base);
+    bool ok = lock_acquired && windows_private_file_prepare(path.storage, path.base);
     HANDLE file = ok ? windows_log_open(path.wide, &size) : INVALID_HANDLE_VALUE;
     ok = ok && file != INVALID_HANDLE_VALUE;
     bool rotate = false;
@@ -962,8 +987,7 @@ static bool windows_log_append(const char *log_path, const char *record, size_t 
 
 #endif /* _WIN32 */
 
-bool cbm_daemon_conflict_log_append(const char *log_path,
-                                    const cbm_daemon_conflict_t *conflict,
+bool cbm_daemon_conflict_log_append(const char *log_path, const cbm_daemon_conflict_t *conflict,
                                     size_t cap_bytes) {
     char record[DAEMON_SERVICE_LOG_RECORD_CAP];
     size_t record_length = 0;

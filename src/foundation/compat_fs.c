@@ -886,11 +886,9 @@ int cbm_rename_replace(const char *src, const char *dst) {
     wchar_t *wdst = cbm_utf8_to_wide(dst);
     int ret = CBM_NOT_FOUND;
     if (wsrc && wdst) {
-        ret =
-            MoveFileExW(wsrc, wdst,
-                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
-                ? 0
-                : CBM_NOT_FOUND;
+        ret = MoveFileExW(wsrc, wdst, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+                  ? 0
+                  : CBM_NOT_FOUND;
     }
     free(wsrc);
     free(wdst);

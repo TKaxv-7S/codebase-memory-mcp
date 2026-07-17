@@ -42,8 +42,7 @@ void cbm_ui_config_path(char *buf, int bufsz) {
 
 /* ── Load ────────────────────────────────────────────────────── */
 
-static char *config_read_file(const char *path, size_t *length_out,
-                              bool *opened_out) {
+static char *config_read_file(const char *path, size_t *length_out, bool *opened_out) {
     if (length_out) {
         *length_out = 0;
     }
@@ -58,25 +57,22 @@ static char *config_read_file(const char *path, size_t *length_out,
     if (!wide_path) {
         return NULL;
     }
-    HANDLE file = CreateFileW(wide_path, GENERIC_READ,
-                              FILE_SHARE_READ | FILE_SHARE_DELETE,
-                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = CreateFileW(wide_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     free(wide_path);
     if (file == INVALID_HANDLE_VALUE) {
         return NULL;
     }
     *opened_out = true;
     LARGE_INTEGER size;
-    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 ||
-        size.QuadPart > 4096) {
+    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > 4096) {
         (void)CloseHandle(file);
         return NULL;
     }
     size_t length = (size_t)size.QuadPart;
     char *buffer = malloc(length + 1U);
     DWORD read_length = 0;
-    bool read_ok = buffer &&
-                   ReadFile(file, buffer, (DWORD)length, &read_length, NULL) &&
+    bool read_ok = buffer && ReadFile(file, buffer, (DWORD)length, &read_length, NULL) &&
                    read_length == (DWORD)length;
     (void)CloseHandle(file);
     if (!read_ok) {
@@ -94,8 +90,7 @@ static char *config_read_file(const char *path, size_t *length_out,
         return NULL;
     }
     long file_length = ftell(file);
-    if (file_length <= 0 || file_length > 4096 ||
-        fseek(file, 0, SEEK_SET) != 0) {
+    if (file_length <= 0 || file_length > 4096 || fseek(file, 0, SEEK_SET) != 0) {
         (void)fclose(file);
         return NULL;
     }
@@ -168,8 +163,7 @@ void cbm_ui_config_load(cbm_ui_config_t *cfg) {
 
 /* ── Save ────────────────────────────────────────────────────── */
 
-static bool config_parent_directory(const char *path, char *directory,
-                                    size_t directory_size) {
+static bool config_parent_directory(const char *path, char *directory, size_t directory_size) {
     int written = snprintf(directory, directory_size, "%s", path ? path : "");
     if (written <= 0 || (size_t)written >= directory_size) {
         return false;
@@ -193,8 +187,7 @@ static bool config_parent_directory(const char *path, char *directory,
 #ifdef _WIN32
 static volatile LONG g_config_temp_sequence = 0;
 
-static bool config_write_atomic(const char *path, const char *json,
-                                size_t json_length) {
+static bool config_write_atomic(const char *path, const char *json, size_t json_length) {
     wchar_t *wide_path = cbm_utf8_to_wide(path);
     if (!wide_path) {
         return false;
@@ -205,19 +198,14 @@ static bool config_write_atomic(const char *path, const char *json,
     if (temporary) {
         for (unsigned int attempt = 0; attempt < 128U; attempt++) {
             ULONG sequence = (ULONG)InterlockedIncrement(&g_config_temp_sequence);
-            int written = swprintf(temporary, temporary_capacity,
-                                   L"%ls.tmp.%08lX.%08lX", wide_path,
-                                   (unsigned long)GetCurrentProcessId(),
-                                   (unsigned long)sequence);
+            int written = swprintf(temporary, temporary_capacity, L"%ls.tmp.%08lX.%08lX", wide_path,
+                                   (unsigned long)GetCurrentProcessId(), (unsigned long)sequence);
             if (written <= 0 || (size_t)written >= temporary_capacity) {
                 break;
             }
             file = CreateFileW(temporary, GENERIC_WRITE, 0, NULL, CREATE_NEW,
-                               FILE_ATTRIBUTE_NORMAL |
-                                   FILE_FLAG_WRITE_THROUGH,
-                               NULL);
-            if (file != INVALID_HANDLE_VALUE ||
-                GetLastError() != ERROR_FILE_EXISTS) {
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, NULL);
+            if (file != INVALID_HANDLE_VALUE || GetLastError() != ERROR_FILE_EXISTS) {
                 break;
             }
         }
@@ -228,8 +216,7 @@ static bool config_write_atomic(const char *path, const char *json,
         size_t remaining = json_length - offset;
         DWORD chunk = remaining > UINT32_MAX ? UINT32_MAX : (DWORD)remaining;
         DWORD written = 0;
-        ok = WriteFile(file, json + offset, chunk, &written, NULL) != 0 &&
-             written > 0;
+        ok = WriteFile(file, json + offset, chunk, &written, NULL) != 0 && written > 0;
         offset += written;
     }
     if (ok) {
@@ -240,8 +227,7 @@ static bool config_write_atomic(const char *path, const char *json,
     }
     if (ok) {
         ok = MoveFileExW(temporary, wide_path,
-                         MOVEFILE_REPLACE_EXISTING |
-                             MOVEFILE_WRITE_THROUGH) != 0;
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
     }
     if (!ok && temporary) {
         (void)DeleteFileW(temporary);
@@ -251,12 +237,10 @@ static bool config_write_atomic(const char *path, const char *json,
     return ok;
 }
 #else
-static bool config_write_all(int descriptor, const char *json,
-                             size_t json_length) {
+static bool config_write_all(int descriptor, const char *json, size_t json_length) {
     size_t offset = 0;
     while (offset < json_length) {
-        ssize_t written = write(descriptor, json + offset,
-                                json_length - offset);
+        ssize_t written = write(descriptor, json + offset, json_length - offset);
         if (written < 0 && errno == EINTR) {
             continue;
         }
@@ -310,8 +294,7 @@ static bool config_sync_parent_directory(const char *path) {
     return synced;
 }
 
-static bool config_write_atomic(const char *path, const char *json,
-                                size_t json_length) {
+static bool config_write_atomic(const char *path, const char *json, size_t json_length) {
     char temporary[CBM_SZ_2K];
     int written = snprintf(temporary, sizeof(temporary), "%s.tmp.XXXXXX", path);
     if (written <= 0 || (size_t)written >= sizeof(temporary)) {
@@ -325,8 +308,8 @@ static bool config_write_atomic(const char *path, const char *json,
     int descriptor_flags = fcntl(descriptor, F_GETFD);
     ok = ok && descriptor_flags >= 0 &&
          fcntl(descriptor, F_SETFD, descriptor_flags | FD_CLOEXEC) == 0;
-    ok = ok && config_write_all(descriptor, json, json_length) &&
-         config_sync_descriptor(descriptor);
+    ok =
+        ok && config_write_all(descriptor, json, json_length) && config_sync_descriptor(descriptor);
     if (close(descriptor) != 0) {
         ok = false;
     }
@@ -358,8 +341,7 @@ bool cbm_ui_config_save(const cbm_ui_config_t *cfg) {
         directory_ready = cbm_mkdir_p(dir, 0750) || cbm_is_dir(dir);
     }
     if (!directory_ready) {
-        cbm_log_error("ui.config.write_fail", "path", path, "reason",
-                      "create_directory");
+        cbm_log_error("ui.config.write_fail", "path", path, "reason", "create_directory");
         return false;
     }
 
@@ -368,16 +350,12 @@ bool cbm_ui_config_save(const cbm_ui_config_t *cfg) {
     bool serialized = doc && root;
     if (serialized) {
         yyjson_mut_doc_set_root(doc, root);
-        serialized =
-            yyjson_mut_obj_add_bool(doc, root, "ui_enabled",
-                                    cfg->ui_enabled) &&
-            yyjson_mut_obj_add_int(doc, root, "ui_port", cfg->ui_port);
+        serialized = yyjson_mut_obj_add_bool(doc, root, "ui_enabled", cfg->ui_enabled) &&
+                     yyjson_mut_obj_add_int(doc, root, "ui_port", cfg->ui_port);
     }
 
     size_t json_len = 0;
-    char *json = serialized
-                     ? yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len)
-                     : NULL;
+    char *json = serialized ? yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len) : NULL;
     if (doc) {
         yyjson_mut_doc_free(doc);
     }
@@ -390,8 +368,7 @@ bool cbm_ui_config_save(const cbm_ui_config_t *cfg) {
     bool saved = config_write_atomic(path, json, json_len);
     free(json);
     if (!saved) {
-        cbm_log_error("ui.config.write_fail", "path", path, "reason",
-                      "atomic_publish");
+        cbm_log_error("ui.config.write_fail", "path", path, "reason", "atomic_publish");
         return false;
     }
 

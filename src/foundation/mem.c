@@ -175,8 +175,7 @@ cbm_mem_budget_t cbm_mem_resolve_budget(size_t total_ram, double ram_fraction,
 }
 
 cbm_mem_budget_t cbm_mem_resolve_budget_capped(size_t total_ram, double ram_fraction,
-                                               const char *budget_mb,
-                                               size_t hard_cap_bytes) {
+                                               const char *budget_mb, size_t hard_cap_bytes) {
     cbm_mem_budget_t result = cbm_mem_resolve_budget(total_ram, ram_fraction, budget_mb);
     if (hard_cap_bytes > 0 && (result.budget == 0 || result.budget > hard_cap_bytes)) {
         result.budget = hard_cap_bytes;

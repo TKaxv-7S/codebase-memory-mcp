@@ -1021,11 +1021,11 @@ static cbm_expr_t *parse_exists_predicate(parser_t *p, bool negated) {
     }
     cbm_node_pattern_t anchor = {0};
     cbm_rel_pattern_t rel = {0};
-    cbm_node_pattern_t far = {0};
-    if (parse_node(p, &anchor) < 0 || parse_rel(p, &rel) < 0 || parse_node(p, &far) < 0) {
+    cbm_node_pattern_t far_node = {0};
+    if (parse_node(p, &anchor) < 0 || parse_rel(p, &rel) < 0 || parse_node(p, &far_node) < 0) {
         free_one_node_pattern(&anchor);
         free_one_rel_pattern(&rel);
-        free_one_node_pattern(&far);
+        free_one_node_pattern(&far_node);
         snprintf(p->error, sizeof(p->error),
                  "unsupported EXISTS pattern — only the single-hop form "
                  "'(var)-[:TYPE]->()' is supported");
@@ -1043,7 +1043,7 @@ static cbm_expr_t *parse_exists_predicate(parser_t *p, bool negated) {
                                                                             : 0;
     free_one_node_pattern(&anchor);
     free_one_rel_pattern(&rel);
-    free_one_node_pattern(&far);
+    free_one_node_pattern(&far_node);
     return expr_leaf(c);
 }
 

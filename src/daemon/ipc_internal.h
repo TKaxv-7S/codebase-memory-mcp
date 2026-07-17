@@ -17,9 +17,8 @@
  * supplies a BCryptGenRandom nonce. */
 #define CBM_DAEMON_IPC_WINDOWS_NAME_CAP 256U
 #define CBM_DAEMON_IPC_WINDOWS_NONCE_SIZE 32U
-#define CBM_DAEMON_IPC_WINDOWS_RENDEZVOUS_RECORD_SIZE                         \
-    (8U + CBM_DAEMON_IPC_WINDOWS_NONCE_SIZE +                                 \
-     CBM_DAEMON_IPC_WINDOWS_NAME_CAP)
+#define CBM_DAEMON_IPC_WINDOWS_RENDEZVOUS_RECORD_SIZE \
+    (8U + CBM_DAEMON_IPC_WINDOWS_NONCE_SIZE + CBM_DAEMON_IPC_WINDOWS_NAME_CAP)
 #define CBM_DAEMON_IPC_WINDOWS_RENDEZVOUS_FILE "cbm-rendezvous.lock"
 
 bool cbm_daemon_ipc_windows_generation_address(
@@ -31,14 +30,13 @@ bool cbm_daemon_ipc_windows_generation_address(
  * generations never publish the deterministic pipe and never treat either
  * object as current authority; startup/lifetime may hold the old startup mutex
  * solely as a compatibility guard against an overlapping pre-cohort process. */
-bool cbm_daemon_ipc_windows_legacy_names(
-    const char *canonical_runtime_parent, const char *instance_key,
-    char pipe_out[CBM_DAEMON_IPC_WINDOWS_NAME_CAP],
-    char startup_mutex_out[CBM_DAEMON_IPC_WINDOWS_NAME_CAP]);
+bool cbm_daemon_ipc_windows_legacy_names(const char *canonical_runtime_parent,
+                                         const char *instance_key,
+                                         char pipe_out[CBM_DAEMON_IPC_WINDOWS_NAME_CAP],
+                                         char startup_mutex_out[CBM_DAEMON_IPC_WINDOWS_NAME_CAP]);
 
 bool cbm_daemon_ipc_windows_rendezvous_record_encode(
-    const uint8_t nonce[CBM_DAEMON_IPC_WINDOWS_NONCE_SIZE],
-    const char *address,
+    const uint8_t nonce[CBM_DAEMON_IPC_WINDOWS_NONCE_SIZE], const char *address,
     uint8_t record_out[CBM_DAEMON_IPC_WINDOWS_RENDEZVOUS_RECORD_SIZE]);
 bool cbm_daemon_ipc_windows_rendezvous_record_decode(
     const uint8_t *record, size_t record_length,
@@ -73,10 +71,9 @@ int cbm_daemon_ipc_wait_pending(const cbm_ipc_pending_ops_t *ops, uint32_t timeo
 /* Internal receive path for fixed-size unauthenticated protocol envelopes.
  * Payloads above max_payload_length poison the stream. The implementation must
  * reject from the decoded header before allocating or reading that payload. */
-int cbm_daemon_ipc_receive_frame_bounded(
-    cbm_daemon_ipc_connection_t *connection, uint32_t timeout_ms,
-    uint32_t max_payload_length, cbm_daemon_frame_t *frame_out,
-    uint8_t **payload_out);
+int cbm_daemon_ipc_receive_frame_bounded(cbm_daemon_ipc_connection_t *connection,
+                                         uint32_t timeout_ms, uint32_t max_payload_length,
+                                         cbm_daemon_frame_t *frame_out, uint8_t **payload_out);
 
 /* Narrow crash/fault seams for publication-state and retry-state tests. They
  * are inert unless a test installs a hook/failure count in its own process. */
@@ -97,7 +94,6 @@ typedef void (*cbm_daemon_ipc_posix_publication_hook_fn)(
 
 void cbm_daemon_ipc_posix_publication_hook_set_for_test(
     cbm_daemon_ipc_posix_publication_hook_fn hook, void *context);
-void cbm_daemon_ipc_windows_legacy_guard_release_failures_set_for_test(
-    unsigned int count);
+void cbm_daemon_ipc_windows_legacy_guard_release_failures_set_for_test(unsigned int count);
 
 #endif /* CBM_DAEMON_IPC_INTERNAL_H */

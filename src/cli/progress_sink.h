@@ -20,8 +20,7 @@
  * forces the same behavior for redirected stderr without touching stdout. */
 bool cbm_cli_progress_enabled(bool explicitly_requested, bool stderr_is_tty);
 void cbm_cli_progress_start(FILE *out, const char *tool_name);
-void cbm_cli_progress_finish(FILE *out, const char *tool_name, bool success,
-                             uint64_t elapsed_ms);
+void cbm_cli_progress_finish(FILE *out, const char *tool_name, bool success, uint64_t elapsed_ms);
 
 void cbm_progress_sink_init(FILE *out);
 void cbm_progress_sink_fini(void);

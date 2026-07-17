@@ -77,9 +77,8 @@ typedef enum {
  * outside this exact shape is INVALID, never an ordinary CLI request. A valid
  * shape is admitted only when its expected fingerprint matches the image
  * captured by this process before stateful initialization. */
-cbm_index_worker_argv_status_t
-cbm_index_worker_parse_process_argv(int argc, char *const argv[],
-                                    cbm_index_worker_invocation_t *invocation_out);
+cbm_index_worker_argv_status_t cbm_index_worker_parse_process_argv(
+    int argc, char *const argv[], cbm_index_worker_invocation_t *invocation_out);
 const char *cbm_index_worker_argv_status_message(cbm_index_worker_argv_status_t status);
 
 /* Host marking (#845): the supervisor gate is OPT-IN per process. Only the real
@@ -118,8 +117,8 @@ typedef struct {
     bool tree_quiesced;
     bool supervision_failed;
     bool response_rejected; /* clean worker exceeded the bounded response protocol */
-    char *response; /* worker result only after a contained, uncancelled CLEAN exit;
-                     * borrowed for async polls, caller-owned from the sync wrapper */
+    char *response;         /* worker result only after a contained, uncancelled CLEAN exit;
+                             * borrowed for async polls, caller-owned from the sync wrapper */
 } cbm_index_worker_result_t;
 
 /* Daemon-owned, nonblocking supervisor for one contained worker process tree. */
@@ -143,10 +142,10 @@ int cbm_index_worker_start(const char *args_json, size_t memory_budget_bytes, bo
  * remains caller-owned until terminal. No process-global sink is installed.
  * Poll stays bounded while draining log bursts and does not report terminal
  * until every completed worker log line has reached this callback. */
-int cbm_index_worker_start_with_log(
-    const char *args_json, size_t memory_budget_bytes, bool single_thread,
-    const char *marker_file, const char *quarantine_file, cbm_proc_log_cb log_callback,
-    void *log_context, cbm_index_worker_handle_t **handle_out);
+int cbm_index_worker_start_with_log(const char *args_json, size_t memory_budget_bytes,
+                                    bool single_thread, const char *marker_file,
+                                    const char *quarantine_file, cbm_proc_log_cb log_callback,
+                                    void *log_context, cbm_index_worker_handle_t **handle_out);
 
 /* Strictly nonblocking and called by one owner thread/event loop. result_out is
  * set to NULL while running and to a borrowed immutable cached result only at
@@ -187,19 +186,19 @@ void cbm_index_worker_destroy(cbm_index_worker_handle_t *handle);
 int cbm_index_spawn_worker(const char *args_json, bool single_thread, const char *marker_file,
                            const char *quarantine_file, cbm_index_worker_result_t *result);
 
-int cbm_index_spawn_worker_with_log(
-    const char *args_json, bool single_thread, const char *marker_file,
-    const char *quarantine_file, cbm_proc_log_cb log_callback, void *log_context,
-    cbm_index_worker_result_t *result);
+int cbm_index_spawn_worker_with_log(const char *args_json, bool single_thread,
+                                    const char *marker_file, const char *quarantine_file,
+                                    cbm_proc_log_cb log_callback, void *log_context,
+                                    cbm_index_worker_result_t *result);
 
 /* Synchronous request-owned variant. A nonzero cancellation flag is forwarded
  * once to the contained worker; polling continues until the complete process
  * tree is terminal, so callers never drop supervision authority on cancel. */
-int cbm_index_spawn_worker_with_log_cancel(
-    const char *args_json, bool single_thread, const char *marker_file,
-    const char *quarantine_file, cbm_proc_log_cb log_callback,
-    void *log_context, const atomic_int *cancel_requested,
-    cbm_index_worker_result_t *result);
+int cbm_index_spawn_worker_with_log_cancel(const char *args_json, bool single_thread,
+                                           const char *marker_file, const char *quarantine_file,
+                                           cbm_proc_log_cb log_callback, void *log_context,
+                                           const atomic_int *cancel_requested,
+                                           cbm_index_worker_result_t *result);
 
 void cbm_index_worker_result_free(cbm_index_worker_result_t *result);
 

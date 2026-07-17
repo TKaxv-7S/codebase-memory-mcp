@@ -646,7 +646,6 @@ static char *ha_build_cline_json(const char *text) {
     return json;
 }
 
-
 /* True for an absolute path we can walk up: POSIX "/..." or a Windows drive
  * root — "X:/..." or a bare "X:" (callers normalize '\\' to '/' first).
  * Declared in cli.h so the Windows drive-letter handling (#618) has direct
@@ -868,10 +867,8 @@ static const char *ha_hook_event_name(yyjson_val *root) {
     return event ? event : ha_obj_str(root, "hookEventName");
 }
 
-static const char *ha_normalized_cwd_with_server(yyjson_val *root,
-                                                 cbm_mcp_server_t *srv,
-                                                 char *buffer,
-                                                 size_t buffer_size) {
+static const char *ha_normalized_cwd_with_server(yyjson_val *root, cbm_mcp_server_t *srv,
+                                                 char *buffer, size_t buffer_size) {
     const char *cwd = ha_obj_str(root, "cwd");
     if (!cwd) {
         yyjson_val *roots = root ? yyjson_obj_get(root, "workspace_roots") : NULL;
@@ -911,8 +908,7 @@ static const char *ha_normalized_cwd_with_server(yyjson_val *root,
 #endif
 }
 
-static const char *ha_normalized_cwd(yyjson_val *root, char *buffer,
-                                     size_t buffer_size) {
+static const char *ha_normalized_cwd(yyjson_val *root, char *buffer, size_t buffer_size) {
     return ha_normalized_cwd_with_server(root, NULL, buffer, buffer_size);
 }
 
@@ -1116,10 +1112,8 @@ static bool ha_invocation_supported(ha_lifecycle_dialect_t dialect, const char *
     return !forced_event || ha_dialect_event_supported(dialect, forced_event);
 }
 
-static char *ha_lifecycle_json_from_root(cbm_mcp_server_t *srv,
-                                         yyjson_val *root,
-                                         const char *forced_event,
-                                         ha_lifecycle_dialect_t dialect) {
+static char *ha_lifecycle_json_from_root(cbm_mcp_server_t *srv, yyjson_val *root,
+                                         const char *forced_event, ha_lifecycle_dialect_t dialect) {
     if (!root || !yyjson_is_obj(root)) {
         return NULL;
     }
@@ -1134,8 +1128,7 @@ static char *ha_lifecycle_json_from_root(cbm_mcp_server_t *srv,
         owned_server = cbm_mcp_server_new(NULL);
         srv = owned_server;
     }
-    const char *cwd = ha_normalized_cwd_with_server(
-        root, srv, cwd_buffer, sizeof(cwd_buffer));
+    const char *cwd = ha_normalized_cwd_with_server(root, srv, cwd_buffer, sizeof(cwd_buffer));
     char *project = srv && cwd ? ha_resolve_indexed_project(srv, cwd) : NULL;
     cbm_mcp_server_free(owned_server);
 
@@ -1215,8 +1208,7 @@ char *cbm_hook_augment_lifecycle_json_for(const char *input, const char *forced_
         return NULL;
     }
     ha_lifecycle_dialect_t dialect = copilot_dialect ? HA_DIALECT_COPILOT : HA_DIALECT_EVENT;
-    char *json = ha_lifecycle_json_from_root(
-        NULL, yyjson_doc_get_root(doc), forced_event, dialect);
+    char *json = ha_lifecycle_json_from_root(NULL, yyjson_doc_get_root(doc), forced_event, dialect);
     yyjson_doc_free(doc);
     return json;
 }
@@ -1235,8 +1227,7 @@ char *cbm_hook_augment_lifecycle_json_for_dialect(const char *input, const char 
     if (!doc) {
         return NULL;
     }
-    char *json = ha_lifecycle_json_from_root(
-        NULL, yyjson_doc_get_root(doc), forced_event, dialect);
+    char *json = ha_lifecycle_json_from_root(NULL, yyjson_doc_get_root(doc), forced_event, dialect);
     yyjson_doc_free(doc);
     return json;
 }
@@ -1287,8 +1278,7 @@ const char *cbm_hook_no_project_index_guidance_for_testing(const char *event) {
 }
 #endif
 
-static char *ha_process(cbm_mcp_server_t *srv, const char *input_json,
-                        const char *forced_event,
+static char *ha_process(cbm_mcp_server_t *srv, const char *input_json, const char *forced_event,
                         ha_lifecycle_dialect_t dialect) {
     if (!srv || !input_json) {
         return NULL;
@@ -1302,8 +1292,7 @@ static char *ha_process(cbm_mcp_server_t *srv, const char *input_json,
     }
     yyjson_val *root = yyjson_doc_get_root(doc);
 
-    char *lifecycle =
-        ha_lifecycle_json_from_root(srv, root, forced_event, dialect);
+    char *lifecycle = ha_lifecycle_json_from_root(srv, root, forced_event, dialect);
     if (lifecycle) {
         yyjson_doc_free(doc);
         return lifecycle;
@@ -1343,8 +1332,7 @@ static char *ha_process(cbm_mcp_server_t *srv, const char *input_json,
     }
 
     char cwdbuf[4096];
-    const char *cwd = ha_normalized_cwd_with_server(
-        root, srv, cwdbuf, sizeof(cwdbuf));
+    const char *cwd = ha_normalized_cwd_with_server(root, srv, cwdbuf, sizeof(cwdbuf));
     if (!cwd) {
         yyjson_doc_free(doc);
         return NULL;
@@ -1357,29 +1345,23 @@ static char *ha_process(cbm_mcp_server_t *srv, const char *input_json,
     return output;
 }
 
-char *cbm_hook_augment_process(cbm_mcp_server_t *srv,
-                               const char *input_json) {
+char *cbm_hook_augment_process(cbm_mcp_server_t *srv, const char *input_json) {
     return cbm_hook_augment_process_for(srv, input_json, NULL, NULL);
 }
 
-bool cbm_hook_augment_invocation_supported(const char *forced_event,
-                                            const char *dialect_name) {
+bool cbm_hook_augment_invocation_supported(const char *forced_event, const char *dialect_name) {
     ha_lifecycle_dialect_t dialect = HA_DIALECT_EVENT;
-    if (dialect_name && dialect_name[0] &&
-        !ha_dialect_from_name(dialect_name, &dialect)) {
+    if (dialect_name && dialect_name[0] && !ha_dialect_from_name(dialect_name, &dialect)) {
         return false;
     }
     return ha_invocation_supported(dialect, forced_event);
 }
 
-char *cbm_hook_augment_process_for(cbm_mcp_server_t *srv,
-                                   const char *input_json,
-                                   const char *forced_event,
-                                   const char *dialect_name) {
+char *cbm_hook_augment_process_for(cbm_mcp_server_t *srv, const char *input_json,
+                                   const char *forced_event, const char *dialect_name) {
     ha_lifecycle_dialect_t dialect = HA_DIALECT_EVENT;
     if (!srv || !input_json ||
-        (dialect_name && dialect_name[0] &&
-         !ha_dialect_from_name(dialect_name, &dialect)) ||
+        (dialect_name && dialect_name[0] && !ha_dialect_from_name(dialect_name, &dialect)) ||
         !ha_invocation_supported(dialect, forced_event)) {
         return NULL;
     }
@@ -1412,8 +1394,7 @@ int cbm_cmd_hook_augment(int argc, char **argv) {
         return 0;
     }
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
-    char *output =
-        srv ? ha_process(srv, input, forced_event, dialect) : NULL;
+    char *output = srv ? ha_process(srv, input, forced_event, dialect) : NULL;
     if (output) {
         fputs(output, stdout);
     }

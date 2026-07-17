@@ -62,6 +62,7 @@ static cbm_daemon_build_identity_t bootstrap_identity(const char *version, const
     cbm_daemon_build_identity_t identity = {
         .semantic_version = version,
         .build_fingerprint = build,
+        .cache_fingerprint = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         .protocol_abi = 3,
         .store_abi = 11,
         .feature_abi = 7,
@@ -111,9 +112,8 @@ static cbm_daemon_bootstrap_probe_status_t bootstrap_fake_probe(
     *client_out = NULL;
     int reserved_remaining = atomic_load(&fake->reserved_probes_remaining);
     while (reserved_remaining > 0 &&
-           !atomic_compare_exchange_weak(&fake->reserved_probes_remaining,
-                                         &reserved_remaining, reserved_remaining - 1)) {
-    }
+           !atomic_compare_exchange_weak(&fake->reserved_probes_remaining, &reserved_remaining,
+                                         reserved_remaining - 1)) {}
     if (reserved_remaining > 0) {
         if (reserved_remaining == 1 && atomic_load(&fake->connect_after_reserved)) {
             atomic_store(&fake->available, true);
@@ -122,10 +122,8 @@ static cbm_daemon_bootstrap_probe_status_t bootstrap_fake_probe(
     }
     int terminal_remaining = atomic_load(&fake->terminal_probes_remaining);
     while (terminal_remaining > 0 &&
-           !atomic_compare_exchange_weak(&fake->terminal_probes_remaining,
-                                         &terminal_remaining,
-                                         terminal_remaining - 1)) {
-    }
+           !atomic_compare_exchange_weak(&fake->terminal_probes_remaining, &terminal_remaining,
+                                         terminal_remaining - 1)) {}
     if (terminal_remaining > 0) {
         return CBM_DAEMON_BOOTSTRAP_PROBE_TERMINAL;
     }
@@ -155,8 +153,7 @@ static cbm_daemon_bootstrap_probe_status_t bootstrap_fake_probe(
 static cbm_version_cohort_status_t bootstrap_fake_cohort_acquire(
     void *opaque, const cbm_daemon_ipc_endpoint_t *endpoint,
     const cbm_daemon_build_identity_t *identity, uint64_t deadline_ms,
-    cbm_daemon_bootstrap_cohort_t *cohort_out,
-    cbm_daemon_conflict_t *conflict_out) {
+    cbm_daemon_bootstrap_cohort_t *cohort_out, cbm_daemon_conflict_t *conflict_out) {
     (void)endpoint;
     (void)deadline_ms;
     bootstrap_fake_ops_t *fake = opaque;
@@ -164,8 +161,7 @@ static cbm_version_cohort_status_t bootstrap_fake_cohort_acquire(
     *cohort_out = NULL;
     memset(conflict_out, 0, sizeof(*conflict_out));
     if (fake->forced_cohort == CBM_VERSION_COHORT_CONFLICT) {
-        cbm_daemon_build_identity_t active =
-            bootstrap_identity("2.3.0", BOOTSTRAP_BUILD_A);
+        cbm_daemon_build_identity_t active = bootstrap_identity("2.3.0", BOOTSTRAP_BUILD_A);
         (void)cbm_daemon_hello_compare(&active, identity, conflict_out);
         return fake->forced_cohort;
     }
@@ -176,8 +172,7 @@ static cbm_version_cohort_status_t bootstrap_fake_cohort_acquire(
     return CBM_VERSION_COHORT_OK;
 }
 
-static void bootstrap_fake_cohort_release(
-    void *opaque, cbm_daemon_bootstrap_cohort_t cohort) {
+static void bootstrap_fake_cohort_release(void *opaque, cbm_daemon_bootstrap_cohort_t cohort) {
     bootstrap_fake_ops_t *fake = opaque;
     if (cohort == fake) {
         atomic_fetch_add(&fake->cohort_release_count, 1);
@@ -197,8 +192,7 @@ static int bootstrap_fake_lock(void *opaque, const cbm_daemon_ipc_endpoint_t *en
     return 1;
 }
 
-static bool bootstrap_fake_unlock(
-    void *opaque, cbm_daemon_bootstrap_lock_t *lock_io) {
+static bool bootstrap_fake_unlock(void *opaque, cbm_daemon_bootstrap_lock_t *lock_io) {
     bootstrap_fake_ops_t *fake = opaque;
     if (lock_io && *lock_io == fake) {
         atomic_store(&fake->lock_held, 0);
@@ -208,8 +202,7 @@ static bool bootstrap_fake_unlock(
     return lock_io && !*lock_io;
 }
 
-static bool bootstrap_fake_handoff(void *opaque,
-                                   cbm_daemon_bootstrap_lock_t lock) {
+static bool bootstrap_fake_handoff(void *opaque, cbm_daemon_bootstrap_lock_t lock) {
     bootstrap_fake_ops_t *fake = opaque;
     if (lock != fake || atomic_load(&fake->lock_held) != 1) {
         return false;
@@ -224,8 +217,7 @@ static bool bootstrap_fake_spawn(void *opaque, const cbm_daemon_bootstrap_launch
                  spec->argv[1] && !spec->argv[2] &&
                  strcmp(spec->argv[1], CBM_DAEMON_INTERNAL_ARG) == 0 && spec->detached &&
                  !spec->inherit_standard_handles && !spec->use_shell &&
-                 atomic_load(&fake->handoff_count) > 0 &&
-                 atomic_load(&fake->lock_held) == 1;
+                 atomic_load(&fake->handoff_count) > 0 && atomic_load(&fake->lock_held) == 1;
     if (!exact) {
         return false;
     }
@@ -296,14 +288,12 @@ TEST(daemon_bootstrap_classifies_stateless_commands_without_client) {
 
 TEST(daemon_bootstrap_classifies_config_as_coordinated_local_cli) {
     char *list[] = {"codebase-memory-mcp", "config", "list", NULL};
-    char *set[] = {"codebase-memory-mcp", "config", "set", "auto_watch",
-                   "false", NULL};
+    char *set[] = {"codebase-memory-mcp", "config", "set", "auto_watch", "false", NULL};
     char *help[] = {"codebase-memory-mcp", "config", "--help", NULL};
     ASSERT_EQ(classify(3, list), CBM_DAEMON_PROCESS_LOCAL_CLI);
     ASSERT_EQ(classify(5, set), CBM_DAEMON_PROCESS_LOCAL_CLI);
     ASSERT_EQ(classify(3, help), CBM_DAEMON_PROCESS_STATELESS);
-    ASSERT_FALSE(cbm_daemon_process_role_requires_client(
-        CBM_DAEMON_PROCESS_LOCAL_CLI));
+    ASSERT_FALSE(cbm_daemon_process_role_requires_client(CBM_DAEMON_PROCESS_LOCAL_CLI));
     PASS();
 }
 
@@ -317,26 +307,24 @@ TEST(daemon_bootstrap_cli_help_is_stateless_but_tool_calls_are_local) {
 }
 
 TEST(daemon_bootstrap_cli_arguments_cannot_reclassify_the_process) {
-    char *install_value[] = {"codebase-memory-mcp", "cli", "search_code",
-                             "--query", "install", NULL};
-    char *version_value[] = {"codebase-memory-mcp", "cli", "search_code",
-                             "--query", "--version", NULL};
+    char *install_value[] = {
+        "codebase-memory-mcp", "cli", "search_code", "--query", "install", NULL};
+    char *version_value[] = {"codebase-memory-mcp", "cli", "search_code", "--query",
+                             "--version",           NULL};
     ASSERT_EQ(classify(5, install_value), CBM_DAEMON_PROCESS_LOCAL_CLI);
     ASSERT_EQ(classify(5, version_value), CBM_DAEMON_PROCESS_LOCAL_CLI);
     PASS();
 }
 
 TEST(daemon_bootstrap_internal_roles_never_take_client_leases) {
-    static char build[] =
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    static char build[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     char *daemon[] = {"codebase-memory-mcp", CBM_DAEMON_INTERNAL_ARG, NULL};
-    char *worker[] = {"codebase-memory-mcp", "cli", "--index-worker",
-                      "--index-worker-build", build, "index_repository",
-                      "{}", "--response-out", "/tmp/response", NULL};
+    char *worker[] = {"codebase-memory-mcp", "cli", "--index-worker", "--index-worker-build", build,
+                      "index_repository",    "{}",  "--response-out", "/tmp/response",        NULL};
     char *malformed_worker[] = {"codebase-memory-mcp", "cli", "--index-worker",
-                                "index_repository", "{}", NULL};
+                                "index_repository",    "{}",  NULL};
     char *reserved_user_value[] = {"codebase-memory-mcp", "cli", "search_code", "--query",
-                                   "--index-worker", NULL};
+                                   "--index-worker",      NULL};
     char *hook[] = {"codebase-memory-mcp", "hook-augment", NULL};
     ASSERT_EQ(classify(2, daemon), CBM_DAEMON_PROCESS_DAEMON);
     ASSERT_EQ(classify(9, worker), CBM_DAEMON_PROCESS_WORKER);
@@ -407,8 +395,7 @@ TEST(daemon_bootstrap_cohort_conflict_is_visible_before_probe_or_spawn) {
     bootstrap_fake_ops_t fake = {0};
     fake.forced_cohort = CBM_VERSION_COHORT_CONFLICT;
     cbm_daemon_bootstrap_ops_t ops = bootstrap_fake_callbacks(&fake);
-    cbm_daemon_build_identity_t identity =
-        bootstrap_identity("2.4.0", BOOTSTRAP_BUILD_B);
+    cbm_daemon_build_identity_t identity = bootstrap_identity("2.4.0", BOOTSTRAP_BUILD_B);
     cbm_daemon_bootstrap_config_t config = {
         .role = CBM_DAEMON_PROCESS_MCP_CLIENT,
         .endpoint = fixture.endpoint,
@@ -428,8 +415,7 @@ TEST(daemon_bootstrap_cohort_conflict_is_visible_before_probe_or_spawn) {
     ASSERT_EQ(atomic_load(&fake.spawn_count), 0);
     ASSERT_EQ(atomic_load(&fake.diagnostic_count), 1);
     ASSERT_NOT_NULL(strstr(fake.diagnostic, "conflicting CBM process is active"));
-    ASSERT_NOT_NULL(strstr(fake.diagnostic,
-                           "Close all CBM sessions and commands"));
+    ASSERT_NOT_NULL(strstr(fake.diagnostic, "Close all CBM sessions and commands"));
     bootstrap_endpoint_fixture_finish(&fixture);
     PASS();
 }
@@ -601,8 +587,7 @@ TEST(daemon_bootstrap_reserved_then_absent_spawns_replacement) {
 TEST(daemon_bootstrap_rejected_connect_is_reserved_and_never_unavailable) {
     cbm_daemon_runtime_connect_result_t capacity = {0};
     capacity.status = CBM_DAEMON_RUNTIME_CONNECT_REJECTED;
-    snprintf(capacity.message, sizeof(capacity.message),
-             "CBM daemon connection capacity reached");
+    snprintf(capacity.message, sizeof(capacity.message), "CBM daemon connection capacity reached");
     ASSERT_EQ(cbm_daemon_bootstrap_classify_failed_connect(&capacity, 1),
               CBM_DAEMON_BOOTSTRAP_PROBE_RESERVED);
     ASSERT_EQ(cbm_daemon_bootstrap_classify_failed_connect(&capacity, 0),

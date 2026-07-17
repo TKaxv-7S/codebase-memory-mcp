@@ -114,13 +114,13 @@ typedef void *cbm_daemon_bootstrap_cohort_t;
  * 0 held by another starter, -1 error. */
 typedef struct {
     void *context;
-    cbm_version_cohort_status_t (*cohort_acquire)(
-        void *context, const cbm_daemon_ipc_endpoint_t *endpoint,
-        const cbm_daemon_build_identity_t *identity, uint64_t deadline_ms,
-        cbm_daemon_bootstrap_cohort_t *cohort_out,
-        cbm_daemon_conflict_t *conflict_out);
-    void (*cohort_release)(void *context,
-                           cbm_daemon_bootstrap_cohort_t cohort);
+    cbm_version_cohort_status_t (*cohort_acquire)(void *context,
+                                                  const cbm_daemon_ipc_endpoint_t *endpoint,
+                                                  const cbm_daemon_build_identity_t *identity,
+                                                  uint64_t deadline_ms,
+                                                  cbm_daemon_bootstrap_cohort_t *cohort_out,
+                                                  cbm_daemon_conflict_t *conflict_out);
+    void (*cohort_release)(void *context, cbm_daemon_bootstrap_cohort_t cohort);
     cbm_daemon_bootstrap_probe_status_t (*probe)(void *context,
                                                  const cbm_daemon_ipc_endpoint_t *endpoint,
                                                  const cbm_daemon_build_identity_t *identity,
@@ -132,11 +132,9 @@ typedef struct {
     /* Called with startup serialization still held immediately before spawn.
      * It releases only migration-era compatibility ownership that the child
      * must reacquire for its lifetime; the ordinary startup lock stays held. */
-    bool (*startup_lock_prepare_handoff)(
-        void *context, cbm_daemon_bootstrap_lock_t lock);
+    bool (*startup_lock_prepare_handoff)(void *context, cbm_daemon_bootstrap_lock_t lock);
     /* Retry-safe: success consumes and clears *lock_io; false retains it. */
-    bool (*startup_lock_release)(
-        void *context, cbm_daemon_bootstrap_lock_t *lock_io);
+    bool (*startup_lock_release)(void *context, cbm_daemon_bootstrap_lock_t *lock_io);
     bool (*spawn_daemon)(void *context, const cbm_daemon_bootstrap_launch_spec_t *spec);
     void (*visible_diagnostic)(void *context, const char *message);
 } cbm_daemon_bootstrap_ops_t;

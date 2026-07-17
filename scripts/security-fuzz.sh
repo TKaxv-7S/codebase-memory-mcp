@@ -24,6 +24,9 @@ TOTAL=0
 # Temp directory for input files (avoids pipe/stdin issues with timeout)
 FUZZ_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$FUZZ_TMPDIR"' EXIT
+FUZZ_HOME="$FUZZ_TMPDIR/home"
+FUZZ_CACHE="$FUZZ_TMPDIR/cache"
+mkdir -p "$FUZZ_HOME" "$FUZZ_CACHE"
 
 # Helper: send a payload to the MCP server and check it doesn't crash.
 # Uses temp file + perl alarm for portable timeout (works on macOS + Linux).
@@ -34,17 +37,24 @@ test_payload() {
 
     # Write session input to a temp file (avoids pipe/stdin issues)
     local tmpinput="$FUZZ_TMPDIR/input_${TOTAL}.jsonl"
-    printf '%s\n%s\n%s\n' \
+    local tmpoutput="$FUZZ_TMPDIR/output_${TOTAL}.jsonl"
+    local acknowledgement_id=$((900000 + TOTAL))
+    printf '%s\n%s\n%s\n%s\n' \
         '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"fuzz","version":"1.0"}}}' \
         '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-        "$payload" > "$tmpinput"
+        "$payload" \
+        "{\"jsonrpc\":\"2.0\",\"id\":$acknowledgement_id,\"method\":\"ping\",\"params\":{}}" \
+        > "$tmpinput"
 
     # Run with 10s timeout: GNU timeout → perl alarm fallback
     local ec=0
     if command -v timeout &>/dev/null; then
-        timeout 10 "$BINARY" < "$tmpinput" > /dev/null 2>&1 || ec=$?
+        HOME="$FUZZ_HOME" CBM_CACHE_DIR="$FUZZ_CACHE" \
+            timeout 10 "$BINARY" < "$tmpinput" > "$tmpoutput" 2>&1 || ec=$?
     else
-        perl -e 'alarm(10); exec @ARGV' -- "$BINARY" < "$tmpinput" > /dev/null 2>&1 || ec=$?
+        HOME="$FUZZ_HOME" CBM_CACHE_DIR="$FUZZ_CACHE" \
+            perl -e 'alarm(10); exec @ARGV' -- "$BINARY" \
+            < "$tmpinput" > "$tmpoutput" 2>&1 || ec=$?
     fi
 
     # Acceptable exits:
@@ -53,7 +63,13 @@ test_payload() {
     #   142 = SIGALRM (perl timeout — hung process, same as GNU timeout 124)
     #   124 = GNU timeout
     if [[ $ec -eq 0 || $ec -eq 141 ]]; then
-        PASS=$((PASS + 1))
+        if grep -Eq "\"id\"[[:space:]]*:[[:space:]]*$acknowledgement_id([^0-9]|$).*\"result\"[[:space:]]*:" \
+            "$tmpoutput"; then
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: $name — target exited before acknowledging payload processing"
+            FAIL=$((FAIL + 1))
+        fi
     elif [[ $ec -eq 124 || $ec -eq 142 ]]; then
         echo "FAIL: $name — timed out (hung for 10s)"
         FAIL=$((FAIL + 1))

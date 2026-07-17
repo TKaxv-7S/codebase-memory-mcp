@@ -734,7 +734,10 @@ static void cbm_posix_child_exec(cbm_subprocess_t *process, int input, int outpu
     for (int fd = STDERR_FILENO + 1; fd < max_fd; fd++) {
         (void)close(fd);
     }
-    execv(process->bin, process->argv);
+    /* A fixed literal tool name (for example "git" or "curl") uses the
+     * caller's normal PATH without introducing a shell. An explicit path
+     * still has execvp's exact-path semantics because it contains '/'. */
+    execvp(process->bin, process->argv);
     _exit(127);
 }
 

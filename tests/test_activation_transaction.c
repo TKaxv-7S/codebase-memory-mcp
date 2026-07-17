@@ -34,20 +34,18 @@
 enum { ACTIVATION_TEST_PATH_CAP = 1024, ACTIVATION_TEST_CONTENT_CAP = 256 };
 
 static bool activation_test_fixture(char out[ACTIVATION_TEST_PATH_CAP]) {
-    int written = snprintf(out, ACTIVATION_TEST_PATH_CAP,
-                           "%s/cbm-activation-transaction-XXXXXX", cbm_tmpdir());
-    return written > 0 && written < ACTIVATION_TEST_PATH_CAP &&
-           cbm_mkdtemp(out) != NULL;
+    int written = snprintf(out, ACTIVATION_TEST_PATH_CAP, "%s/cbm-activation-transaction-XXXXXX",
+                           cbm_tmpdir());
+    return written > 0 && written < ACTIVATION_TEST_PATH_CAP && cbm_mkdtemp(out) != NULL;
 }
 
-static bool activation_test_path(char out[ACTIVATION_TEST_PATH_CAP],
-                                 const char *directory, const char *name) {
+static bool activation_test_path(char out[ACTIVATION_TEST_PATH_CAP], const char *directory,
+                                 const char *name) {
     int written = snprintf(out, ACTIVATION_TEST_PATH_CAP, "%s/%s", directory, name);
     return written > 0 && written < ACTIVATION_TEST_PATH_CAP;
 }
 
-static bool activation_test_read(const char *path,
-                                 char out[ACTIVATION_TEST_CONTENT_CAP]) {
+static bool activation_test_read(const char *path, char out[ACTIVATION_TEST_CONTENT_CAP]) {
     FILE *file = cbm_fopen(path, "rb");
     if (!file) {
         return false;
@@ -110,19 +108,16 @@ typedef struct {
 } activation_test_callback_allow_ace_t;
 
 static wchar_t *activation_test_windows_utf8_to_wide(const char *value) {
-    int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
-                                     NULL, 0);
+    int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, NULL, 0);
     wchar_t *wide = needed > 0 ? calloc((size_t)needed, sizeof(*wide)) : NULL;
-    if (!wide || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
-                                     wide, needed) <= 0) {
+    if (!wide || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, wide, needed) <= 0) {
         free(wide);
         return NULL;
     }
     return wide;
 }
 
-static bool activation_test_windows_current_user_sid(void **information_out,
-                                                     PSID *sid_out) {
+static bool activation_test_windows_current_user_sid(void **information_out, PSID *sid_out) {
     *information_out = NULL;
     *sid_out = NULL;
     HANDLE token = NULL;
@@ -132,9 +127,8 @@ static bool activation_test_windows_current_user_sid(void **information_out,
     DWORD needed = 0;
     (void)GetTokenInformation(token, TokenUser, NULL, 0, &needed);
     void *information = needed > 0 ? calloc(1, needed) : NULL;
-    bool ok = information &&
-              GetTokenInformation(token, TokenUser, information, needed,
-                                  &needed) != 0;
+    bool ok =
+        information && GetTokenInformation(token, TokenUser, information, needed, &needed) != 0;
     (void)CloseHandle(token);
     if (!ok) {
         free(information);
@@ -150,31 +144,27 @@ static bool activation_test_windows_current_user_sid(void **information_out,
     return true;
 }
 
-static bool activation_test_windows_set_directory_acl(
-    const char *path, bool include_untrusted_callback) {
+static bool activation_test_windows_set_directory_acl(const char *path,
+                                                      bool include_untrusted_callback) {
     void *user_information = NULL;
     PSID user_sid = NULL;
-    if (!activation_test_windows_current_user_sid(&user_information,
-                                                  &user_sid)) {
+    if (!activation_test_windows_current_user_sid(&user_information, &user_sid)) {
         return false;
     }
     unsigned char world_sid_storage[SECURITY_MAX_SID_SIZE];
     DWORD world_sid_size = sizeof(world_sid_storage);
     PSID world_sid = world_sid_storage;
-    bool ok = CreateWellKnownSid(WinWorldSid, NULL, world_sid,
-                                 &world_sid_size) != 0;
+    bool ok = CreateWellKnownSid(WinWorldSid, NULL, world_sid, &world_sid_size) != 0;
     DWORD world_sid_length = ok ? GetLengthSid(world_sid) : 0U;
-    DWORD user_ace_size = (DWORD)(sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD)) +
-                          GetLengthSid(user_sid);
+    DWORD user_ace_size =
+        (DWORD)(sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD)) + GetLengthSid(user_sid);
     DWORD callback_ace_size =
-        (DWORD)(sizeof(activation_test_callback_allow_ace_t) - sizeof(DWORD)) +
-        world_sid_length;
-    DWORD acl_size = (DWORD)sizeof(ACL) + user_ace_size +
-                     (include_untrusted_callback ? callback_ace_size : 0U);
+        (DWORD)(sizeof(activation_test_callback_allow_ace_t) - sizeof(DWORD)) + world_sid_length;
+    DWORD acl_size =
+        (DWORD)sizeof(ACL) + user_ace_size + (include_untrusted_callback ? callback_ace_size : 0U);
     PACL acl = ok ? calloc(1, acl_size) : NULL;
     ok = acl && InitializeAcl(acl, acl_size, ACL_REVISION) != 0 &&
-         AddAccessAllowedAceEx(acl, ACL_REVISION, 0, GENERIC_ALL,
-                               user_sid) != 0;
+         AddAccessAllowedAceEx(acl, ACL_REVISION, 0, GENERIC_ALL, user_sid) != 0;
     unsigned char *callback_storage =
         include_untrusted_callback ? calloc(1, callback_ace_size) : NULL;
     if (ok && include_untrusted_callback) {
@@ -186,27 +176,21 @@ static bool activation_test_windows_set_directory_acl(
             callback->header.AceFlags = 0;
             callback->header.AceSize = (WORD)callback_ace_size;
             callback->mask = FILE_ADD_FILE | FILE_DELETE_CHILD;
-            ok = CopySid(world_sid_length, &callback->sid_start, world_sid) !=
-                     0 &&
-                 AddAce(acl, ACL_REVISION, MAXDWORD, callback,
-                        callback_ace_size) != 0;
+            ok = CopySid(world_sid_length, &callback->sid_start, world_sid) != 0 &&
+                 AddAce(acl, ACL_REVISION, MAXDWORD, callback, callback_ace_size) != 0;
         }
     }
     wchar_t *wide_path = ok ? activation_test_windows_utf8_to_wide(path) : NULL;
-    HANDLE directory = wide_path
-                           ? CreateFileW(wide_path, READ_CONTROL | WRITE_DAC,
-                                         FILE_SHARE_READ | FILE_SHARE_WRITE |
-                                             FILE_SHARE_DELETE,
-                                         NULL, OPEN_EXISTING,
-                                         FILE_FLAG_BACKUP_SEMANTICS |
-                                             FILE_FLAG_OPEN_REPARSE_POINT,
-                                         NULL)
-                           : INVALID_HANDLE_VALUE;
+    HANDLE directory =
+        wide_path ? CreateFileW(wide_path, READ_CONTROL | WRITE_DAC,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                OPEN_EXISTING,
+                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL)
+                  : INVALID_HANDLE_VALUE;
     ok = directory != INVALID_HANDLE_VALUE &&
          SetSecurityInfo(directory, SE_FILE_OBJECT,
-                         DACL_SECURITY_INFORMATION |
-                             PROTECTED_DACL_SECURITY_INFORMATION,
-                         NULL, NULL, acl, NULL) == ERROR_SUCCESS;
+                         DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL,
+                         NULL, acl, NULL) == ERROR_SUCCESS;
     if (directory != INVALID_HANDLE_VALUE) {
         (void)CloseHandle(directory);
     }
@@ -217,28 +201,22 @@ static bool activation_test_windows_set_directory_acl(
     return ok;
 }
 
-static bool activation_test_windows_directory_owned_by_current_user(
-    const char *path) {
+static bool activation_test_windows_directory_owned_by_current_user(const char *path) {
     void *user_information = NULL;
     PSID user_sid = NULL;
     wchar_t *wide_path = activation_test_windows_utf8_to_wide(path);
-    HANDLE directory = wide_path
-                           ? CreateFileW(wide_path, READ_CONTROL,
-                                         FILE_SHARE_READ | FILE_SHARE_WRITE |
-                                             FILE_SHARE_DELETE,
-                                         NULL, OPEN_EXISTING,
-                                         FILE_FLAG_BACKUP_SEMANTICS |
-                                             FILE_FLAG_OPEN_REPARSE_POINT,
-                                         NULL)
-                           : INVALID_HANDLE_VALUE;
+    HANDLE directory =
+        wide_path ? CreateFileW(wide_path, READ_CONTROL,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                OPEN_EXISTING,
+                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL)
+                  : INVALID_HANDLE_VALUE;
     PSID owner = NULL;
     PSECURITY_DESCRIPTOR descriptor = NULL;
     bool ok = directory != INVALID_HANDLE_VALUE &&
-              activation_test_windows_current_user_sid(&user_information,
-                                                       &user_sid) &&
-              GetSecurityInfo(directory, SE_FILE_OBJECT,
-                              OWNER_SECURITY_INFORMATION, &owner, NULL, NULL,
-                              NULL, &descriptor) == ERROR_SUCCESS &&
+              activation_test_windows_current_user_sid(&user_information, &user_sid) &&
+              GetSecurityInfo(directory, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner, NULL,
+                              NULL, NULL, &descriptor) == ERROR_SUCCESS &&
               owner && IsValidSid(owner) && EqualSid(owner, user_sid);
     if (descriptor) {
         (void)LocalFree(descriptor);
@@ -258,11 +236,9 @@ typedef struct {
     bool created;
 } activation_test_competing_target_t;
 
-static void activation_test_create_competing_target(const char *target_path,
-                                                     void *opaque) {
+static void activation_test_create_competing_target(const char *target_path, void *opaque) {
     activation_test_competing_target_t *competing = opaque;
-    competing->created = activation_test_write(target_path,
-                                                competing->contents);
+    competing->created = activation_test_write(target_path, competing->contents);
 }
 #endif
 
@@ -273,8 +249,7 @@ typedef enum {
     ACTIVATION_TEST_ACL_ERROR = 2,
 } activation_test_acl_status_t;
 
-static activation_test_acl_status_t activation_test_install_mutating_acl(
-    const char *path) {
+static activation_test_acl_status_t activation_test_install_mutating_acl(const char *path) {
     acl_t acl = acl_init(1);
     if (!acl) {
         return ACTIVATION_TEST_ACL_ERROR;
@@ -292,8 +267,7 @@ static activation_test_acl_status_t activation_test_install_mutating_acl(
                  acl_add_perm(permissions, ACL_ADD_FILE) == 0 &&
                  acl_add_perm(permissions, ACL_ADD_SUBDIRECTORY) == 0 &&
                  acl_add_perm(permissions, ACL_DELETE_CHILD) == 0 &&
-                 acl_set_permset(entry, permissions) == 0 &&
-                 acl_valid(acl) == 0;
+                 acl_set_permset(entry, permissions) == 0 && acl_valid(acl) == 0;
     activation_test_acl_status_t status = ACTIVATION_TEST_ACL_ERROR;
     if (valid) {
         errno = 0;
@@ -323,8 +297,7 @@ static bool activation_test_clear_extended_acl_if_exists(const char *path) {
            activation_test_clear_extended_acl(path);
 }
 
-static bool activation_test_acl_metadata_acceptable(const char *path,
-                                                    bool expect_directory) {
+static bool activation_test_acl_metadata_acceptable(const char *path, bool expect_directory) {
     struct stat status;
     if (lstat(path, &status) != 0 || status.st_uid != geteuid() ||
         (status.st_mode & 0777) != 0700) {
@@ -342,8 +315,8 @@ TEST(activation_transaction_stages_same_directory_private_executable_and_aborts)
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_NOT_NULL(transaction);
     const char *staged = cbm_activation_transaction_staged_path(transaction);
@@ -365,8 +338,7 @@ TEST(activation_transaction_stages_same_directory_private_executable_and_aborts)
 
     char staged_copy[ACTIVATION_TEST_PATH_CAP];
     (void)snprintf(staged_copy, sizeof(staged_copy), "%s", staged);
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_NULL(transaction);
     ASSERT_FALSE(activation_test_exists(staged_copy));
     ASSERT_FALSE(activation_test_exists(target));
@@ -382,8 +354,7 @@ TEST(activation_transaction_commit_keeps_backup_until_finalize) {
     ASSERT_TRUE(activation_test_write(target, "old"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "new", strlen("new"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "new", strlen("new"), &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     const char *backup = cbm_activation_transaction_backup_path(transaction);
     ASSERT_NOT_NULL(backup);
@@ -394,9 +365,7 @@ TEST(activation_transaction_commit_keeps_backup_until_finalize) {
         .expect_absent = false,
         .expected_contents = "new",
     };
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_validate,
-                                                 &validation),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_validate, &validation),
               CBM_ACTIVATION_TRANSACTION_OK);
     char contents[ACTIVATION_TEST_CONTENT_CAP];
     ASSERT_TRUE(activation_test_read(target, contents));
@@ -404,11 +373,9 @@ TEST(activation_transaction_commit_keeps_backup_until_finalize) {
     ASSERT_TRUE(activation_test_read(backup_copy, contents));
     ASSERT_STR_EQ(contents, "old");
 
-    ASSERT_EQ(cbm_activation_transaction_finalize(transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_finalize(transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_FALSE(activation_test_exists(backup_copy));
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_EQ(th_rmtree(directory), 0);
     PASS();
 }
@@ -421,23 +388,20 @@ TEST(activation_transaction_validation_failure_restores_previous_target) {
     ASSERT_TRUE(activation_test_write(target, "old"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "bad", strlen("bad"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "bad", strlen("bad"), &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     const char *backup = cbm_activation_transaction_backup_path(transaction);
     ASSERT_NOT_NULL(backup);
     char backup_copy[ACTIVATION_TEST_PATH_CAP];
     (void)snprintf(backup_copy, sizeof(backup_copy), "%s", backup);
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_reject, NULL),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_reject, NULL),
               CBM_ACTIVATION_TRANSACTION_VALIDATION_FAILED);
 
     char contents[ACTIVATION_TEST_CONTENT_CAP];
     ASSERT_TRUE(activation_test_read(target, contents));
     ASSERT_STR_EQ(contents, "old");
     ASSERT_FALSE(activation_test_exists(backup_copy));
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_EQ(th_rmtree(directory), 0);
     PASS();
 }
@@ -450,24 +414,19 @@ TEST(activation_transaction_explicit_rollback_restores_previous_target) {
     ASSERT_TRUE(activation_test_write(target, "old"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "new", strlen("new"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "new", strlen("new"), &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     activation_test_validation_t validation = {
         .expect_absent = false,
         .expected_contents = "new",
     };
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_validate,
-                                                 &validation),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_validate, &validation),
               CBM_ACTIVATION_TRANSACTION_OK);
-    ASSERT_EQ(cbm_activation_transaction_rollback(transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_rollback(transaction), CBM_ACTIVATION_TRANSACTION_OK);
     char contents[ACTIVATION_TEST_CONTENT_CAP];
     ASSERT_TRUE(activation_test_read(target, contents));
     ASSERT_STR_EQ(contents, "old");
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_EQ(th_rmtree(directory), 0);
     PASS();
 }
@@ -482,21 +441,16 @@ TEST(activation_transaction_stage_file_installs_new_target) {
     ASSERT_TRUE(activation_test_write(source, "downloaded"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_file(target, source,
-                                                     &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_file(target, source, &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     activation_test_validation_t validation = {
         .expect_absent = false,
         .expected_contents = "downloaded",
     };
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_validate,
-                                                 &validation),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_validate, &validation),
               CBM_ACTIVATION_TRANSACTION_OK);
-    ASSERT_EQ(cbm_activation_transaction_finalize(transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_finalize(transaction), CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     char contents[ACTIVATION_TEST_CONTENT_CAP];
     ASSERT_TRUE(activation_test_read(target, contents));
     ASSERT_STR_EQ(contents, "downloaded");
@@ -518,16 +472,12 @@ TEST(activation_transaction_removal_can_rollback_or_finalize) {
     cbm_activation_transaction_t *transaction = NULL;
     ASSERT_EQ(cbm_activation_transaction_stage_removal(target, &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_validate,
-                                                 &absent),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_validate, &absent),
               CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_FALSE(activation_test_exists(target));
-    ASSERT_EQ(cbm_activation_transaction_rollback(transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_rollback(transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_TRUE(activation_test_exists(target));
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
 
     ASSERT_EQ(cbm_activation_transaction_stage_removal(target, &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
@@ -535,16 +485,12 @@ TEST(activation_transaction_removal_can_rollback_or_finalize) {
     ASSERT_NOT_NULL(backup);
     char backup_copy[ACTIVATION_TEST_PATH_CAP];
     (void)snprintf(backup_copy, sizeof(backup_copy), "%s", backup);
-    ASSERT_EQ(cbm_activation_transaction_commit(transaction,
-                                                 activation_test_validate,
-                                                 &absent),
+    ASSERT_EQ(cbm_activation_transaction_commit(transaction, activation_test_validate, &absent),
               CBM_ACTIVATION_TRANSACTION_OK);
-    ASSERT_EQ(cbm_activation_transaction_finalize(transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_finalize(transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_FALSE(activation_test_exists(target));
     ASSERT_FALSE(activation_test_exists(backup_copy));
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_EQ(th_rmtree(directory), 0);
     PASS();
 }
@@ -557,8 +503,8 @@ TEST(activation_transaction_rejects_cross_account_writable_target_directory) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_EQ(chmod(directory, 0777), 0);
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
     ASSERT_EQ(chmod(directory, 0700), 0);
@@ -574,19 +520,16 @@ TEST(activation_transaction_rejects_windows_callback_allow_directory_ace) {
     ASSERT_TRUE(activation_test_fixture(directory));
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_TRUE(activation_test_windows_set_directory_acl(directory, true));
-    ASSERT_TRUE(
-        activation_test_windows_directory_owned_by_current_user(directory));
+    ASSERT_TRUE(activation_test_windows_directory_owned_by_current_user(directory));
 
     cbm_activation_transaction_t *transaction = NULL;
-    cbm_activation_transaction_status_t stage_status =
-        cbm_activation_transaction_stage_bytes(
-            target, "candidate", strlen("candidate"), &transaction);
+    cbm_activation_transaction_status_t stage_status = cbm_activation_transaction_stage_bytes(
+        target, "candidate", strlen("candidate"), &transaction);
     bool transaction_was_created = transaction != NULL;
     cbm_activation_transaction_status_t close_status =
         transaction ? cbm_activation_transaction_close(&transaction)
                     : CBM_ACTIVATION_TRANSACTION_OK;
-    bool acl_restored =
-        activation_test_windows_set_directory_acl(directory, false);
+    bool acl_restored = activation_test_windows_set_directory_acl(directory, false);
     int cleanup_status = th_rmtree(directory);
 
     ASSERT_EQ(stage_status, CBM_ACTIVATION_TRANSACTION_IO);
@@ -615,20 +558,16 @@ TEST(activation_transaction_rejects_symlink_candidate_target_and_parent) {
     char linked_nested_candidate[ACTIVATION_TEST_PATH_CAP];
     ASSERT_TRUE(activation_test_fixture(directory));
     ASSERT_TRUE(activation_test_path(candidate, directory, "candidate"));
-    ASSERT_TRUE(activation_test_path(candidate_link, directory,
-                                     "candidate-link"));
+    ASSERT_TRUE(activation_test_path(candidate_link, directory, "candidate-link"));
     ASSERT_TRUE(activation_test_path(target, directory, "target"));
     ASSERT_TRUE(activation_test_path(target_link, directory, "target-link"));
     ASSERT_TRUE(activation_test_path(real_parent, directory, "real-parent"));
     ASSERT_TRUE(activation_test_path(real_nested, real_parent, "nested"));
-    ASSERT_TRUE(activation_test_path(real_nested_candidate, real_nested,
-                                     "candidate"));
+    ASSERT_TRUE(activation_test_path(real_nested_candidate, real_nested, "candidate"));
     ASSERT_TRUE(activation_test_path(parent_link, directory, "parent-link"));
     ASSERT_TRUE(activation_test_path(linked_parent_target, parent_link, "cbm"));
-    ASSERT_TRUE(activation_test_path(linked_nested_target, parent_link,
-                                     "nested/cbm"));
-    ASSERT_TRUE(activation_test_path(linked_nested_candidate, parent_link,
-                                     "nested/candidate"));
+    ASSERT_TRUE(activation_test_path(linked_nested_target, parent_link, "nested/cbm"));
+    ASSERT_TRUE(activation_test_path(linked_nested_candidate, parent_link, "nested/candidate"));
     ASSERT_TRUE(activation_test_write(candidate, "candidate"));
     ASSERT_EQ(symlink(candidate, candidate_link), 0);
     ASSERT_EQ(symlink(candidate, target_link), 0);
@@ -638,27 +577,22 @@ TEST(activation_transaction_rejects_symlink_candidate_target_and_parent) {
     ASSERT_EQ(symlink(real_parent, parent_link), 0);
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_file(target, candidate_link,
-                                                     &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_file(target, candidate_link, &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
-    ASSERT_EQ(cbm_activation_transaction_stage_file(
-                  target, linked_nested_candidate, &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_file(target, linked_nested_candidate, &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target_link, "replacement", strlen("replacement"),
-                  &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target_link, "replacement",
+                                                     strlen("replacement"), &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  linked_parent_target, "replacement", strlen("replacement"),
-                  &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(linked_parent_target, "replacement",
+                                                     strlen("replacement"), &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  linked_nested_target, "replacement", strlen("replacement"),
-                  &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(linked_nested_target, "replacement",
+                                                     strlen("replacement"), &transaction),
               CBM_ACTIVATION_TRANSACTION_IO);
     ASSERT_NULL(transaction);
 
@@ -685,8 +619,8 @@ TEST(activation_transaction_fails_closed_if_target_directory_is_replaced) {
     ASSERT_TRUE(activation_test_path(target, active, "cbm"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_EQ(rename(active, moved), 0);
     ASSERT_TRUE(cbm_mkdir_p(active, 0700));
@@ -695,8 +629,7 @@ TEST(activation_transaction_fails_closed_if_target_directory_is_replaced) {
     ASSERT_FALSE(activation_test_exists(target));
     ASSERT_EQ(cbm_rmdir(active), 0);
     ASSERT_EQ(rename(moved, active), 0);
-    ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-              CBM_ACTIVATION_TRANSACTION_OK);
+    ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
     ASSERT_NULL(transaction);
     ASSERT_EQ(th_rmtree(root), 0);
     PASS();
@@ -710,8 +643,8 @@ TEST(activation_transaction_does_not_replace_target_created_at_publish_boundary)
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
 
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
     const char *staged = cbm_activation_transaction_staged_path(transaction);
     ASSERT_NOT_NULL(staged);
@@ -764,8 +697,7 @@ TEST(activation_transaction_rejects_macos_mutating_extended_acl) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_EQ(chmod(directory, 0700), 0);
 
-    activation_test_acl_status_t acl_status =
-        activation_test_install_mutating_acl(directory);
+    activation_test_acl_status_t acl_status = activation_test_install_mutating_acl(directory);
     if (acl_status == ACTIVATION_TEST_ACL_UNSUPPORTED) {
         ASSERT_EQ(th_rmtree(directory), 0);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
@@ -777,9 +709,8 @@ TEST(activation_transaction_rejects_macos_mutating_extended_acl) {
     ASSERT_EQ(status.st_mode & 0777, 0700);
 
     cbm_activation_transaction_t *transaction = NULL;
-    cbm_activation_transaction_status_t stage_status =
-        cbm_activation_transaction_stage_bytes(
-            target, "candidate", strlen("candidate"), &transaction);
+    cbm_activation_transaction_status_t stage_status = cbm_activation_transaction_stage_bytes(
+        target, "candidate", strlen("candidate"), &transaction);
     bool transaction_was_created = transaction != NULL;
     cbm_activation_transaction_status_t close_status =
         transaction ? cbm_activation_transaction_close(&transaction)
@@ -802,27 +733,22 @@ TEST(activation_transaction_rejects_macos_existing_target_mutating_acl) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_TRUE(activation_test_write(target, "old"));
 
-    activation_test_acl_status_t acl_status =
-        activation_test_install_mutating_acl(target);
+    activation_test_acl_status_t acl_status = activation_test_install_mutating_acl(target);
     if (acl_status == ACTIVATION_TEST_ACL_UNSUPPORTED) {
         ASSERT_EQ(th_rmtree(directory), 0);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     ASSERT_EQ(acl_status, ACTIVATION_TEST_ACL_OK);
-    bool metadata_acceptable =
-        activation_test_acl_metadata_acceptable(target, false);
+    bool metadata_acceptable = activation_test_acl_metadata_acceptable(target, false);
 
     cbm_activation_transaction_t *transaction = NULL;
-    cbm_activation_transaction_status_t stage_status =
-        cbm_activation_transaction_stage_bytes(
-            target, "candidate", strlen("candidate"), &transaction);
+    cbm_activation_transaction_status_t stage_status = cbm_activation_transaction_stage_bytes(
+        target, "candidate", strlen("candidate"), &transaction);
     char staged[ACTIVATION_TEST_PATH_CAP] = {0};
     char backup[ACTIVATION_TEST_PATH_CAP] = {0};
     if (transaction) {
-        const char *staged_path =
-            cbm_activation_transaction_staged_path(transaction);
-        const char *backup_path =
-            cbm_activation_transaction_backup_path(transaction);
+        const char *staged_path = cbm_activation_transaction_staged_path(transaction);
+        const char *backup_path = cbm_activation_transaction_backup_path(transaction);
         if (staged_path) {
             (void)snprintf(staged, sizeof(staged), "%s", staged_path);
         }
@@ -830,15 +756,12 @@ TEST(activation_transaction_rejects_macos_existing_target_mutating_acl) {
             (void)snprintf(backup, sizeof(backup), "%s", backup_path);
         }
     }
-    cbm_activation_transaction_status_t commit_status =
-        CBM_ACTIVATION_TRANSACTION_INVALID_STATE;
+    cbm_activation_transaction_status_t commit_status = CBM_ACTIVATION_TRANSACTION_INVALID_STATE;
     if (stage_status == CBM_ACTIVATION_TRANSACTION_OK && transaction) {
-        commit_status =
-            cbm_activation_transaction_commit(transaction, NULL, NULL);
+        commit_status = cbm_activation_transaction_commit(transaction, NULL, NULL);
     }
     char observed[ACTIVATION_TEST_CONTENT_CAP];
-    bool target_unchanged = activation_test_read(target, observed) &&
-                            strcmp(observed, "old") == 0;
+    bool target_unchanged = activation_test_read(target, observed) && strcmp(observed, "old") == 0;
     bool acl_cleared = activation_test_clear_extended_acl_if_exists(target) &&
                        activation_test_clear_extended_acl_if_exists(staged) &&
                        activation_test_clear_extended_acl_if_exists(backup);
@@ -846,8 +769,7 @@ TEST(activation_transaction_rejects_macos_existing_target_mutating_acl) {
         transaction ? cbm_activation_transaction_close(&transaction)
                     : CBM_ACTIVATION_TRANSACTION_OK;
     char restored[ACTIVATION_TEST_CONTENT_CAP];
-    bool target_restored = activation_test_read(target, restored) &&
-                           strcmp(restored, "old") == 0;
+    bool target_restored = activation_test_read(target, restored) && strcmp(restored, "old") == 0;
     int cleanup_status = th_rmtree(directory);
 
     ASSERT_TRUE(metadata_acceptable);
@@ -872,26 +794,22 @@ TEST(activation_transaction_revalidates_macos_directory_acl_before_commit) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_TRUE(activation_test_write(target, "old"));
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
 
-    activation_test_acl_status_t acl_status =
-        activation_test_install_mutating_acl(directory);
+    activation_test_acl_status_t acl_status = activation_test_install_mutating_acl(directory);
     if (acl_status == ACTIVATION_TEST_ACL_UNSUPPORTED) {
-        ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-                  CBM_ACTIVATION_TRANSACTION_OK);
+        ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
         ASSERT_EQ(th_rmtree(directory), 0);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     ASSERT_EQ(acl_status, ACTIVATION_TEST_ACL_OK);
-    bool metadata_acceptable =
-        activation_test_acl_metadata_acceptable(directory, true);
+    bool metadata_acceptable = activation_test_acl_metadata_acceptable(directory, true);
     cbm_activation_transaction_status_t commit_status =
         cbm_activation_transaction_commit(transaction, NULL, NULL);
     char observed[ACTIVATION_TEST_CONTENT_CAP];
-    bool target_unchanged = activation_test_read(target, observed) &&
-                            strcmp(observed, "old") == 0;
+    bool target_unchanged = activation_test_read(target, observed) && strcmp(observed, "old") == 0;
     bool acl_cleared = activation_test_clear_extended_acl(directory);
     cbm_activation_transaction_status_t close_status =
         cbm_activation_transaction_close(&transaction);
@@ -916,31 +834,26 @@ TEST(activation_transaction_revalidates_macos_staged_file_acl_before_commit) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_TRUE(activation_test_write(target, "old"));
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
-    const char *staged_path =
-        cbm_activation_transaction_staged_path(transaction);
+    const char *staged_path = cbm_activation_transaction_staged_path(transaction);
     ASSERT_NOT_NULL(staged_path);
     char staged[ACTIVATION_TEST_PATH_CAP];
     (void)snprintf(staged, sizeof(staged), "%s", staged_path);
 
-    activation_test_acl_status_t acl_status =
-        activation_test_install_mutating_acl(staged);
+    activation_test_acl_status_t acl_status = activation_test_install_mutating_acl(staged);
     if (acl_status == ACTIVATION_TEST_ACL_UNSUPPORTED) {
-        ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-                  CBM_ACTIVATION_TRANSACTION_OK);
+        ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
         ASSERT_EQ(th_rmtree(directory), 0);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     ASSERT_EQ(acl_status, ACTIVATION_TEST_ACL_OK);
-    bool metadata_acceptable =
-        activation_test_acl_metadata_acceptable(staged, false);
+    bool metadata_acceptable = activation_test_acl_metadata_acceptable(staged, false);
     cbm_activation_transaction_status_t commit_status =
         cbm_activation_transaction_commit(transaction, NULL, NULL);
     char observed[ACTIVATION_TEST_CONTENT_CAP];
-    bool target_unchanged = activation_test_read(target, observed) &&
-                            strcmp(observed, "old") == 0;
+    bool target_unchanged = activation_test_read(target, observed) && strcmp(observed, "old") == 0;
     bool acl_cleared = activation_test_clear_extended_acl_if_exists(staged) &&
                        activation_test_clear_extended_acl_if_exists(target);
     cbm_activation_transaction_status_t close_status =
@@ -966,31 +879,26 @@ TEST(activation_transaction_revalidates_macos_target_file_acl_before_commit) {
     ASSERT_TRUE(activation_test_path(target, directory, "cbm"));
     ASSERT_TRUE(activation_test_write(target, "old"));
     cbm_activation_transaction_t *transaction = NULL;
-    ASSERT_EQ(cbm_activation_transaction_stage_bytes(
-                  target, "candidate", strlen("candidate"), &transaction),
+    ASSERT_EQ(cbm_activation_transaction_stage_bytes(target, "candidate", strlen("candidate"),
+                                                     &transaction),
               CBM_ACTIVATION_TRANSACTION_OK);
-    const char *backup_path =
-        cbm_activation_transaction_backup_path(transaction);
+    const char *backup_path = cbm_activation_transaction_backup_path(transaction);
     ASSERT_NOT_NULL(backup_path);
     char backup[ACTIVATION_TEST_PATH_CAP];
     (void)snprintf(backup, sizeof(backup), "%s", backup_path);
 
-    activation_test_acl_status_t acl_status =
-        activation_test_install_mutating_acl(target);
+    activation_test_acl_status_t acl_status = activation_test_install_mutating_acl(target);
     if (acl_status == ACTIVATION_TEST_ACL_UNSUPPORTED) {
-        ASSERT_EQ(cbm_activation_transaction_close(&transaction),
-                  CBM_ACTIVATION_TRANSACTION_OK);
+        ASSERT_EQ(cbm_activation_transaction_close(&transaction), CBM_ACTIVATION_TRANSACTION_OK);
         ASSERT_EQ(th_rmtree(directory), 0);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     ASSERT_EQ(acl_status, ACTIVATION_TEST_ACL_OK);
-    bool metadata_acceptable =
-        activation_test_acl_metadata_acceptable(target, false);
+    bool metadata_acceptable = activation_test_acl_metadata_acceptable(target, false);
     cbm_activation_transaction_status_t commit_status =
         cbm_activation_transaction_commit(transaction, NULL, NULL);
     char observed[ACTIVATION_TEST_CONTENT_CAP];
-    bool target_unchanged = activation_test_read(target, observed) &&
-                            strcmp(observed, "old") == 0;
+    bool target_unchanged = activation_test_read(target, observed) && strcmp(observed, "old") == 0;
     bool acl_cleared = activation_test_clear_extended_acl_if_exists(target) &&
                        activation_test_clear_extended_acl_if_exists(backup);
     cbm_activation_transaction_status_t close_status =

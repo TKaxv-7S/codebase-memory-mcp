@@ -88,9 +88,7 @@ TEST(config_save_atomically_replaces_a_complete_generation) {
     char *td = cbm_mkdtemp(tmpdir);
     ASSERT_NOT_NULL(td);
 
-    char *old_cache = getenv("CBM_CACHE_DIR")
-                          ? strdup(getenv("CBM_CACHE_DIR"))
-                          : NULL;
+    char *old_cache = getenv("CBM_CACHE_DIR") ? strdup(getenv("CBM_CACHE_DIR")) : NULL;
     ASSERT_EQ(cbm_setenv("CBM_CACHE_DIR", td, 1), 0);
 
     cbm_ui_config_t old_generation = {
@@ -104,10 +102,9 @@ TEST(config_save_atomically_replaces_a_complete_generation) {
 #ifdef _WIN32
     wchar_t *wide_path = cbm_utf8_to_wide(path);
     ASSERT_NOT_NULL(wide_path);
-    HANDLE old_handle = CreateFileW(
-        wide_path, GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE old_handle =
+        CreateFileW(wide_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     free(wide_path);
     ASSERT_TRUE(old_handle != INVALID_HANDLE_VALUE);
 #else
@@ -124,14 +121,12 @@ TEST(config_save_atomically_replaces_a_complete_generation) {
     char old_bytes[512] = {0};
 #ifdef _WIN32
     DWORD old_length = 0;
-    ASSERT_TRUE(ReadFile(old_handle, old_bytes,
-                         (DWORD)sizeof(old_bytes) - 1U, &old_length,
-                         NULL) != 0);
+    ASSERT_TRUE(ReadFile(old_handle, old_bytes, (DWORD)sizeof(old_bytes) - 1U, &old_length, NULL) !=
+                0);
     ASSERT_GT(old_length, 0);
     ASSERT_TRUE(CloseHandle(old_handle) != 0);
 #else
-    size_t old_length = fread(old_bytes, 1, sizeof(old_bytes) - 1,
-                              old_handle);
+    size_t old_length = fread(old_bytes, 1, sizeof(old_bytes) - 1, old_handle);
     ASSERT_GT(old_length, 0);
     ASSERT_EQ(fclose(old_handle), 0);
 #endif

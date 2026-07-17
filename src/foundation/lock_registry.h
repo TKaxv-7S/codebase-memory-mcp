@@ -21,8 +21,8 @@ cbm_lock_registry_t *cbm_lock_registry_new(cbm_private_lock_directory_t *directo
 
 /* Sticky cancellation: stores true with release ordering and wakes registry
  * waiters. The token must outlive every acquisition that observes it. */
-cbm_private_file_lock_status_t cbm_lock_registry_request_cancel(
-    cbm_lock_registry_t *registry, cbm_lock_cancel_token_t *token);
+cbm_private_file_lock_status_t cbm_lock_registry_request_cancel(cbm_lock_registry_t *registry,
+                                                                cbm_lock_cancel_token_t *token);
 
 /* The directory is borrowed and must outlive the registry and every lease.
  * Resource keys must come from a bounded internal namespace: lock sidecars are
@@ -45,9 +45,10 @@ cbm_private_file_lock_status_t cbm_lock_registry_acquire(
 /* Make one fair process-local/native acquisition attempt without parking.
  * A free lock can succeed; existing queued/native contention returns BUSY.
  * Cleanup-only lease semantics are identical to the waiting API. */
-cbm_private_file_lock_status_t cbm_lock_registry_try_acquire(
-    cbm_lock_registry_t *registry, const char *resource_key,
-    cbm_private_file_lock_mode_t mode, cbm_lock_lease_t **lease_out);
+cbm_private_file_lock_status_t cbm_lock_registry_try_acquire(cbm_lock_registry_t *registry,
+                                                             const char *resource_key,
+                                                             cbm_private_file_lock_mode_t mode,
+                                                             cbm_lock_lease_t **lease_out);
 
 /* Writers release .rw before .turn. Readers retain only .rw. The same release
  * call disposes cleanup-only leases returned by failed acquisition rollback,

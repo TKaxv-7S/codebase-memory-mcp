@@ -51,6 +51,18 @@ done
 
 print_env "test.sh"
 
+# Step 0: fast build/security harness regressions run before the compiler-heavy
+# suite. The Windows package surface is static here; native launcher behavior is
+# exercised by scripts/test-windows.ps1.
+echo "=== Step 0a: Windows launcher bundle contract ==="
+bash "$ROOT/tests/test_windows_bundle_contract.sh"
+
+echo "=== Step 0b: tree-sitter runtime Makefile dependencies ==="
+bash "$ROOT/tests/test_makefile_ts_runtime_dependencies.sh"
+
+echo "=== Step 0c: security fuzz harness self-test ==="
+bash "$ROOT/tests/test_security_fuzz_harness.sh"
+
 # Verify compiler supports target arch
 verify_compiler "$CC"
 

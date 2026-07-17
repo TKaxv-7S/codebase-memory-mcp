@@ -54,10 +54,10 @@ void cbm_watcher_free(cbm_watcher_t *w);
 /* Install or clear daemon-owned stale-root coordination. Passing NULL for
  * begin/end clears all callbacks. The setter waits for an in-flight prune
  * callback to finish before returning. */
-void cbm_watcher_set_project_mutation_guard(
-    cbm_watcher_t *w, cbm_watcher_project_mutation_begin_fn begin,
-    cbm_watcher_project_mutation_end_fn end, cbm_watcher_project_pruned_fn pruned,
-    void *context);
+void cbm_watcher_set_project_mutation_guard(cbm_watcher_t *w,
+                                            cbm_watcher_project_mutation_begin_fn begin,
+                                            cbm_watcher_project_mutation_end_fn end,
+                                            cbm_watcher_project_pruned_fn pruned, void *context);
 
 /* ── Watch list management ──────────────────────────────────────── */
 

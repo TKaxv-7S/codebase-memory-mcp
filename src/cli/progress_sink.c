@@ -38,17 +38,13 @@ static atomic_int s_sink_mutex_state = ATOMIC_VAR_INIT(LOCK_UNINITIALIZED);
  * so keep one process-lifetime mutex rather than destroying it at fini. */
 static void progress_sink_mutex_ensure(void) {
     int expected = LOCK_UNINITIALIZED;
-    if (atomic_compare_exchange_strong_explicit(
-            &s_sink_mutex_state, &expected, LOCK_INITIALIZING,
-            memory_order_acq_rel, memory_order_acquire)) {
+    if (atomic_compare_exchange_strong_explicit(&s_sink_mutex_state, &expected, LOCK_INITIALIZING,
+                                                memory_order_acq_rel, memory_order_acquire)) {
         cbm_mutex_init(&s_sink_mutex);
-        atomic_store_explicit(&s_sink_mutex_state, LOCK_READY,
-                              memory_order_release);
+        atomic_store_explicit(&s_sink_mutex_state, LOCK_READY, memory_order_release);
         return;
     }
-    while (atomic_load_explicit(&s_sink_mutex_state, memory_order_acquire) !=
-           LOCK_READY) {
-    }
+    while (atomic_load_explicit(&s_sink_mutex_state, memory_order_acquire) != LOCK_READY) {}
 }
 
 bool cbm_cli_progress_enabled(bool explicitly_requested, bool stderr_is_tty) {
@@ -84,21 +80,19 @@ void cbm_cli_progress_start(FILE *out, const char *tool_name) {
     (void)fflush(stream);
 }
 
-void cbm_cli_progress_finish(FILE *out, const char *tool_name, bool success,
-                             uint64_t elapsed_ms) {
+void cbm_cli_progress_finish(FILE *out, const char *tool_name, bool success, uint64_t elapsed_ms) {
     FILE *stream = out ? out : stderr;
     char safe_name[CBM_SZ_64] = {0};
     progress_tool_name(tool_name, safe_name);
-    (void)fprintf(stream, "%s %s (%llu ms)\n", success ? "Completed" : "Failed",
-                  safe_name, (unsigned long long)elapsed_ms);
+    (void)fprintf(stream, "%s %s (%llu ms)\n", success ? "Completed" : "Failed", safe_name,
+                  (unsigned long long)elapsed_ms);
     (void)fflush(stream);
 }
 
 /* Extract one string field from the logger's compact JSON format. Keys are
  * accepted only at object boundaries so worker-controlled values cannot spoof
  * a progress event by merely containing a key-shaped substring. */
-static const char *extract_json_field(const char *line, const char *key, char *buf,
-                                      int buf_len) {
+static const char *extract_json_field(const char *line, const char *key, char *buf, int buf_len) {
     char needle[CBM_SZ_64];
     int needle_len = snprintf(needle, sizeof(needle), "\"%s\":", key);
     if (needle_len <= 0 || needle_len >= (int)sizeof(needle)) {

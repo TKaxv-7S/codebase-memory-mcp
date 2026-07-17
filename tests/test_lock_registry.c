@@ -122,10 +122,9 @@ typedef struct {
 
 static void *lock_registry_waiter_run(void *opaque) {
     lock_registry_waiter_t *waiter = opaque;
-    waiter->status =
-        cbm_lock_registry_acquire(waiter->registry, waiter->resource_key, waiter->mode,
-                                  cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS,
-                                  &waiter->cancel_token, &waiter->lease);
+    waiter->status = cbm_lock_registry_acquire(waiter->registry, waiter->resource_key, waiter->mode,
+                                               cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS,
+                                               &waiter->cancel_token, &waiter->lease);
     atomic_store_explicit(&waiter->finished, true, memory_order_release);
     return NULL;
 }
@@ -152,10 +151,11 @@ TEST(lock_registry_cancelled_wait_rolls_back_and_does_not_barge) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *holder = NULL;
     cbm_private_file_lock_status_t holder_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "cancelled-waiter", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "cancelled-waiter",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
+            : CBM_PRIVATE_FILE_LOCK_IO;
 
     lock_registry_waiter_t waiter = {.registry = fixture.registry,
                                      .resource_key = "cancelled-waiter",
@@ -209,10 +209,11 @@ TEST(lock_registry_cancelled_wait_rolls_back_and_does_not_barge) {
         holder ? cbm_lock_lease_release(&holder) : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_lock_lease_t *after = NULL;
     cbm_private_file_lock_status_t after_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "cancelled-waiter", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "cancelled-waiter",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     if (after) {
         (void)cbm_lock_lease_release(&after);
     }
@@ -249,10 +250,9 @@ TEST(lock_registry_failed_rollback_returns_cleanup_only_lease) {
                                      CBM_PRIVATE_FILE_LOCK_RELEASE_UNLOCK);
     cbm_lock_lease_t *cleanup = NULL;
     cbm_private_file_lock_status_t status =
-        fault_set ? cbm_lock_registry_acquire(fixture.registry, "rollback-cleanup",
-                                              CBM_PRIVATE_FILE_LOCK_EX,
-                                              cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS,
-                                              &fault.cancel_token, &cleanup)
+        fault_set ? cbm_lock_registry_acquire(
+                        fixture.registry, "rollback-cleanup", CBM_PRIVATE_FILE_LOCK_EX,
+                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, &fault.cancel_token, &cleanup)
                   : CBM_PRIVATE_FILE_LOCK_IO;
     bool reached_native_ready = atomic_load_explicit(&fault.native_ready, memory_order_acquire);
     bool cleanup_retained = cleanup != NULL;
@@ -424,10 +424,11 @@ TEST(lock_registry_terminal_close_error_finishes_pending_accounting) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *reader = NULL;
     cbm_private_file_lock_status_t acquired =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "terminal-close-accounting", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &reader)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "terminal-close-accounting",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &reader)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     bool retryable_close_set = cbm_lock_lease_fail_next_release_step_for_test(
         reader, CBM_LOCK_REGISTRY_RELEASE_RW, CBM_PRIVATE_FILE_LOCK_RELEASE_CLOSE);
     cbm_private_file_lock_status_t first_release =
@@ -443,10 +444,11 @@ TEST(lock_registry_terminal_close_error_finishes_pending_accounting) {
     size_t cleanup_finished = cbm_lock_registry_pending_cleanup_count_for_test(fixture.registry);
     cbm_lock_lease_t *after = NULL;
     cbm_private_file_lock_status_t after_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "terminal-close-accounting", CBM_PRIVATE_FILE_LOCK_EX,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "terminal-close-accounting",
+                                        CBM_PRIVATE_FILE_LOCK_EX,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t after_release =
         after ? cbm_lock_lease_release(&after) : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t final_free =
@@ -565,10 +567,11 @@ TEST(lock_registry_reader_close_failure_retains_lease_and_accounting) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *reader = NULL;
     cbm_private_file_lock_status_t acquired =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "retry-reader-close", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &reader)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "retry-reader-close",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &reader)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     bool fault_set = cbm_lock_lease_fail_next_release_step_for_test(
         reader, CBM_LOCK_REGISTRY_RELEASE_RW, CBM_PRIVATE_FILE_LOCK_RELEASE_CLOSE);
     cbm_private_file_lock_status_t first_release =
@@ -597,10 +600,11 @@ TEST(lock_registry_reader_close_failure_retains_lease_and_accounting) {
     size_t active_after_retry = cbm_lock_registry_active_lease_count_for_test(fixture.registry);
     cbm_lock_lease_t *after = NULL;
     cbm_private_file_lock_status_t after_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "retry-reader-close", CBM_PRIVATE_FILE_LOCK_EX,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "retry-reader-close",
+                                        CBM_PRIVATE_FILE_LOCK_EX,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t after_release =
         after ? cbm_lock_lease_release(&after) : CBM_PRIVATE_FILE_LOCK_IO;
     lock_registry_fixture_finish(&fixture);
@@ -633,10 +637,11 @@ TEST(lock_registry_writer_partial_release_retries_rw_then_turn) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *writer = NULL;
     cbm_private_file_lock_status_t acquired =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "retry-writer-turn", CBM_PRIVATE_FILE_LOCK_EX,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &writer)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "retry-writer-turn",
+                                        CBM_PRIVATE_FILE_LOCK_EX,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &writer)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     bool fault_set = cbm_lock_lease_fail_next_release_step_for_test(
         writer, CBM_LOCK_REGISTRY_RELEASE_TURN, CBM_PRIVATE_FILE_LOCK_RELEASE_UNLOCK);
     cbm_private_file_lock_status_t first_release =
@@ -687,10 +692,11 @@ TEST(lock_registry_writer_partial_release_retries_rw_then_turn) {
     size_t active_after_retry = cbm_lock_registry_active_lease_count_for_test(fixture.registry);
     cbm_lock_lease_t *after = NULL;
     cbm_private_file_lock_status_t after_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "retry-writer-turn", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "retry-writer-turn",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &after)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t after_release =
         after ? cbm_lock_lease_release(&after) : CBM_PRIVATE_FILE_LOCK_IO;
     lock_registry_fixture_finish(&fixture);
@@ -821,17 +827,18 @@ TEST(lock_registry_large_queue_parks_non_head_waiters) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *holder = NULL;
     cbm_private_file_lock_status_t holder_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "large-queue-parking", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "large-queue-parking",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
+            : CBM_PRIVATE_FILE_LOCK_IO;
 
     lock_registry_waiter_t waiters[LOCK_REGISTRY_PARKING_WAITERS];
     cbm_thread_t threads[LOCK_REGISTRY_PARKING_WAITERS];
     size_t thread_count = 0;
     memset(waiters, 0, sizeof(waiters));
-    for (; holder_status == CBM_PRIVATE_FILE_LOCK_OK &&
-           thread_count < LOCK_REGISTRY_PARKING_WAITERS;
+    for (;
+         holder_status == CBM_PRIVATE_FILE_LOCK_OK && thread_count < LOCK_REGISTRY_PARKING_WAITERS;
          thread_count++) {
         waiters[thread_count] = (lock_registry_waiter_t){
             .registry = fixture.registry,
@@ -850,10 +857,9 @@ TEST(lock_registry_large_queue_parks_non_head_waiters) {
     bool all_queued = false;
     bool tails_parked = false;
     uint64_t observe_deadline = cbm_now_ms() + 500;
-    while (thread_count == LOCK_REGISTRY_PARKING_WAITERS &&
-           cbm_now_ms() < observe_deadline) {
-        all_queued = cbm_lock_registry_waiter_count(fixture.registry) ==
-                     LOCK_REGISTRY_PARKING_WAITERS;
+    while (thread_count == LOCK_REGISTRY_PARKING_WAITERS && cbm_now_ms() < observe_deadline) {
+        all_queued =
+            cbm_lock_registry_waiter_count(fixture.registry) == LOCK_REGISTRY_PARKING_WAITERS;
         tails_parked = cbm_lock_registry_condition_waiter_count_for_test(fixture.registry) >=
                        LOCK_REGISTRY_PARKING_WAITERS - 1;
         if (all_queued && tails_parked) {
@@ -862,11 +868,9 @@ TEST(lock_registry_large_queue_parks_non_head_waiters) {
         lock_registry_test_yield();
     }
     size_t attempting = cbm_lock_registry_attempting_waiter_count_for_test(fixture.registry);
-    uint64_t waits_before =
-        cbm_lock_registry_condition_wait_call_count_for_test(fixture.registry);
+    uint64_t waits_before = cbm_lock_registry_condition_wait_call_count_for_test(fixture.registry);
     cbm_usleep(25000);
-    uint64_t waits_after =
-        cbm_lock_registry_condition_wait_call_count_for_test(fixture.registry);
+    uint64_t waits_after = cbm_lock_registry_condition_wait_call_count_for_test(fixture.registry);
 
     for (size_t index = 0; index < thread_count; index++) {
         (void)cbm_lock_registry_request_cancel(fixture.registry, &waiters[index].cancel_token);
@@ -905,10 +909,11 @@ TEST(lock_registry_cancel_request_wakes_parked_tail) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *holder = NULL;
     cbm_private_file_lock_status_t holder_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "cancel-parked-tail", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "cancel-parked-tail",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
+            : CBM_PRIVATE_FILE_LOCK_IO;
 
     lock_registry_waiter_t head = {.registry = fixture.registry,
                                    .resource_key = "cancel-parked-tail",
@@ -937,8 +942,8 @@ TEST(lock_registry_cancel_request_wakes_parked_tail) {
     atomic_init(&tail.cancel_token, false);
     atomic_init(&tail.finished, false);
     cbm_thread_t tail_thread;
-    bool tail_started = head_attempting &&
-                        cbm_thread_create(&tail_thread, 0, lock_registry_waiter_run, &tail) == 0;
+    bool tail_started =
+        head_attempting && cbm_thread_create(&tail_thread, 0, lock_registry_waiter_run, &tail) == 0;
     bool tail_parked = false;
     uint64_t tail_deadline = cbm_now_ms() + 500;
     while (tail_started && cbm_now_ms() < tail_deadline) {
@@ -963,8 +968,8 @@ TEST(lock_registry_cancel_request_wakes_parked_tail) {
         }
         lock_registry_test_yield();
     }
-    bool head_still_waiting = head_started &&
-                              !atomic_load_explicit(&head.finished, memory_order_acquire);
+    bool head_still_waiting =
+        head_started && !atomic_load_explicit(&head.finished, memory_order_acquire);
 
     if (head_started) {
         (void)cbm_lock_registry_request_cancel(fixture.registry, &head.cancel_token);
@@ -1024,9 +1029,9 @@ static void *lock_registry_deadline_waiter_run(void *opaque) {
     while (!atomic_load_explicit(&waiter->go, memory_order_acquire)) {
         lock_registry_test_yield();
     }
-    waiter->status = cbm_lock_registry_acquire(
-        waiter->registry, "absolute-deadline", CBM_PRIVATE_FILE_LOCK_EX, waiter->deadline_ms,
-        &waiter->cancel_token, &waiter->lease);
+    waiter->status =
+        cbm_lock_registry_acquire(waiter->registry, "absolute-deadline", CBM_PRIVATE_FILE_LOCK_EX,
+                                  waiter->deadline_ms, &waiter->cancel_token, &waiter->lease);
     waiter->returned_ms = cbm_now_ms();
     atomic_store_explicit(&waiter->finished, true, memory_order_release);
     return NULL;
@@ -1040,10 +1045,11 @@ TEST(lock_registry_absolute_deadline_survives_repeated_wakes) {
     bool started = lock_registry_fixture_start(&fixture);
     cbm_lock_lease_t *holder = NULL;
     cbm_private_file_lock_status_t holder_status =
-        started ? cbm_lock_registry_acquire(
-                      fixture.registry, "absolute-deadline", CBM_PRIVATE_FILE_LOCK_SH,
-                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(fixture.registry, "absolute-deadline",
+                                        CBM_PRIVATE_FILE_LOCK_SH,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &holder)
+            : CBM_PRIVATE_FILE_LOCK_IO;
 
     lock_registry_waiter_t head = {.registry = fixture.registry,
                                    .resource_key = "absolute-deadline",
@@ -1072,9 +1078,9 @@ TEST(lock_registry_absolute_deadline_survives_repeated_wakes) {
     atomic_init(&tail.go, false);
     atomic_init(&tail.finished, false);
     cbm_thread_t tail_thread;
-    bool tail_started = head_attempting &&
-                        cbm_thread_create(&tail_thread, 0, lock_registry_deadline_waiter_run,
-                                          &tail) == 0;
+    bool tail_started =
+        head_attempting &&
+        cbm_thread_create(&tail_thread, 0, lock_registry_deadline_waiter_run, &tail) == 0;
     uint64_t ready_deadline = cbm_now_ms() + 500;
     while (tail_started && !atomic_load_explicit(&tail.ready, memory_order_acquire) &&
            cbm_now_ms() < ready_deadline) {
@@ -1174,9 +1180,9 @@ static void *lock_registry_stress_run(void *opaque) {
                                                 ? CBM_PRIVATE_FILE_LOCK_EX
                                                 : CBM_PRIVATE_FILE_LOCK_SH;
         cbm_lock_lease_t *lease = NULL;
-        cbm_private_file_lock_status_t status = cbm_lock_registry_acquire(
-            worker->registry, "stress", mode, cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL,
-            &lease);
+        cbm_private_file_lock_status_t status =
+            cbm_lock_registry_acquire(worker->registry, "stress", mode,
+                                      cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &lease);
         if (status != CBM_PRIVATE_FILE_LOCK_OK || !lease) {
             (void)atomic_fetch_add_explicit(worker->violations, 1, memory_order_relaxed);
             return NULL;
@@ -1315,10 +1321,10 @@ static int lock_registry_writer_child(const char *root, int started_fd, int acqu
     bool started = registry && lock_registry_pipe_write(started_fd, 'S');
     cbm_lock_lease_t *lease = NULL;
     cbm_private_file_lock_status_t status =
-        started ? cbm_lock_registry_acquire(registry, "writer-preference", CBM_PRIVATE_FILE_LOCK_EX,
-                                            cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL,
-                                            &lease)
-                : CBM_PRIVATE_FILE_LOCK_IO;
+        started
+            ? cbm_lock_registry_acquire(registry, "writer-preference", CBM_PRIVATE_FILE_LOCK_EX,
+                                        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &lease)
+            : CBM_PRIVATE_FILE_LOCK_IO;
     bool reported =
         lock_registry_pipe_write(acquired_fd, status == CBM_PRIVATE_FILE_LOCK_OK ? 'W' : 'E');
     char command = 0;
@@ -1371,9 +1377,9 @@ static int lock_registry_reader_child(const char *root, int acquired_fd, int att
 static int lock_registry_inherited_child(cbm_lock_registry_t *registry,
                                          cbm_lock_lease_t *inherited_lease, int report_fd) {
     cbm_lock_lease_t *new_lease = NULL;
-    cbm_private_file_lock_status_t acquire_status = cbm_lock_registry_acquire(
-        registry, "fork-registry", CBM_PRIVATE_FILE_LOCK_EX,
-        cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &new_lease);
+    cbm_private_file_lock_status_t acquire_status =
+        cbm_lock_registry_acquire(registry, "fork-registry", CBM_PRIVATE_FILE_LOCK_EX,
+                                  cbm_now_ms() + LOCK_REGISTRY_TEST_TIMEOUT_MS, NULL, &new_lease);
     cbm_private_file_lock_status_t release_status = cbm_lock_lease_release(&inherited_lease);
     cbm_private_file_lock_status_t free_status = cbm_lock_registry_free(&registry);
     bool reported = lock_registry_pipe_write(report_fd, (char)acquire_status) &&

@@ -91,8 +91,7 @@ static cbm_activation_transaction_before_absent_publish_for_test_fn
 static void *activation_before_absent_publish_context_for_test;
 
 void cbm_activation_transaction_set_before_absent_publish_for_test(
-    cbm_activation_transaction_before_absent_publish_for_test_fn hook,
-    void *context) {
+    cbm_activation_transaction_before_absent_publish_for_test_fn hook, void *context) {
     activation_before_absent_publish_context_for_test = context;
     activation_before_absent_publish_for_test = hook;
 }
@@ -118,8 +117,8 @@ static char *activation_string_span(const char *value, size_t length) {
     return copy;
 }
 
-static bool activation_target_parts(const char *target_path,
-                                    char **directory_out, char **name_out) {
+static bool activation_target_parts(const char *target_path, char **directory_out,
+                                    char **name_out) {
     *directory_out = NULL;
     *name_out = NULL;
     if (!target_path || !target_path[0]) {
@@ -149,8 +148,7 @@ static bool activation_target_parts(const char *target_path,
         *directory_out = activation_string_span(target_path, 3U);
 #endif
     } else {
-        *directory_out = activation_string_span(
-            target_path, (size_t)(separator - target_path));
+        *directory_out = activation_string_span(target_path, (size_t)(separator - target_path));
     }
     if (*directory_out) {
         *name_out = activation_string_copy(base);
@@ -177,10 +175,8 @@ static char *activation_path_name_copy(const char *path) {
 }
 
 static char *activation_unique_path(const char *directory, const char *tag) {
-    uint64_t sequence = atomic_fetch_add_explicit(
-                            &activation_unique_sequence, 1U,
-                            memory_order_relaxed) +
-                        1U;
+    uint64_t sequence =
+        atomic_fetch_add_explicit(&activation_unique_sequence, 1U, memory_order_relaxed) + 1U;
 #ifdef _WIN32
     unsigned long process_id = (unsigned long)GetCurrentProcessId();
 #else
@@ -194,10 +190,8 @@ static char *activation_unique_path(const char *directory, const char *tag) {
     }
     int written = snprintf(
         path, needed, "%s%s.cbm-%s-%lu-%" PRIu64, directory,
-        directory[directory_length - 1U] == '/' ||
-                directory[directory_length - 1U] == '\\'
-            ? ""
-            : "/",
+        directory[directory_length - 1U] == '/' || directory[directory_length - 1U] == '\\' ? ""
+                                                                                            : "/",
         tag, process_id, sequence);
     if (written <= 0 || (size_t)written >= needed) {
         free(path);
@@ -209,8 +203,7 @@ static char *activation_unique_path(const char *directory, const char *tag) {
 static bool activation_identity_equal(const activation_file_identity_t *left,
                                       const activation_file_identity_t *right) {
 #ifdef _WIN32
-    return left->volume_serial == right->volume_serial &&
-           left->index_high == right->index_high &&
+    return left->volume_serial == right->volume_serial && left->index_high == right->index_high &&
            left->index_low == right->index_low;
 #else
     return left->device == right->device && left->inode == right->inode;
@@ -231,14 +224,12 @@ static wchar_t *activation_utf8_to_wide(const char *value) {
     if (!value) {
         return NULL;
     }
-    int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
-                                     NULL, 0);
+    int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, NULL, 0);
     if (needed <= 0) {
         return NULL;
     }
     wchar_t *wide = malloc((size_t)needed * sizeof(*wide));
-    if (!wide || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1,
-                                     wide, needed) <= 0) {
+    if (!wide || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, wide, needed) <= 0) {
         free(wide);
         return NULL;
     }
@@ -259,9 +250,8 @@ static bool activation_windows_user(void **information_out, PSID *sid_out) {
         return false;
     }
     void *information = calloc(1, needed);
-    bool ok = information &&
-              GetTokenInformation(token, TokenUser, information, needed,
-                                  &needed) != 0;
+    bool ok =
+        information && GetTokenInformation(token, TokenUser, information, needed, &needed) != 0;
     (void)CloseHandle(token);
     if (!ok) {
         free(information);
@@ -277,11 +267,9 @@ static bool activation_windows_user(void **information_out, PSID *sid_out) {
     return true;
 }
 
-static bool activation_windows_security_init(
-    activation_windows_security_t *security) {
+static bool activation_windows_security_init(activation_windows_security_t *security) {
     memset(security, 0, sizeof(*security));
-    if (!activation_windows_user(&security->token_information,
-                                 &security->user_sid)) {
+    if (!activation_windows_user(&security->token_information, &security->user_sid)) {
         return false;
     }
     EXPLICIT_ACCESSW access;
@@ -292,14 +280,11 @@ static bool activation_windows_security_init(
     access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     access.Trustee.TrusteeType = TRUSTEE_IS_USER;
     access.Trustee.ptstrName = (LPWSTR)security->user_sid;
-    bool ok = SetEntriesInAclW(1, &access, NULL, &security->acl) == ERROR_SUCCESS &&
-              InitializeSecurityDescriptor(&security->descriptor,
-                                           SECURITY_DESCRIPTOR_REVISION) &&
-              SetSecurityDescriptorDacl(&security->descriptor, TRUE,
-                                        security->acl, FALSE) &&
-              SetSecurityDescriptorControl(&security->descriptor,
-                                           SE_DACL_PROTECTED,
-                                           SE_DACL_PROTECTED);
+    bool ok =
+        SetEntriesInAclW(1, &access, NULL, &security->acl) == ERROR_SUCCESS &&
+        InitializeSecurityDescriptor(&security->descriptor, SECURITY_DESCRIPTOR_REVISION) &&
+        SetSecurityDescriptorDacl(&security->descriptor, TRUE, security->acl, FALSE) &&
+        SetSecurityDescriptorControl(&security->descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED);
     if (!ok) {
         if (security->acl) {
             (void)LocalFree(security->acl);
@@ -314,8 +299,7 @@ static bool activation_windows_security_init(
     return true;
 }
 
-static void activation_windows_security_destroy(
-    activation_windows_security_t *security) {
+static void activation_windows_security_destroy(activation_windows_security_t *security) {
     if (security->acl) {
         (void)LocalFree(security->acl);
     }
@@ -331,11 +315,9 @@ static bool activation_windows_owner_is_current(HANDLE handle) {
     }
     PSID owner = NULL;
     PSECURITY_DESCRIPTOR descriptor = NULL;
-    DWORD result = GetSecurityInfo(handle, SE_FILE_OBJECT,
-                                   OWNER_SECURITY_INFORMATION, &owner, NULL,
+    DWORD result = GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner, NULL,
                                    NULL, NULL, &descriptor);
-    bool same = result == ERROR_SUCCESS && owner && IsValidSid(owner) &&
-                EqualSid(owner, user_sid);
+    bool same = result == ERROR_SUCCESS && owner && IsValidSid(owner) && EqualSid(owner, user_sid);
     if (descriptor) {
         (void)LocalFree(descriptor);
     }
@@ -351,21 +333,17 @@ static bool activation_windows_acl_secure(HANDLE handle) {
     }
     PACL dacl = NULL;
     PSECURITY_DESCRIPTOR descriptor = NULL;
-    DWORD result = GetSecurityInfo(handle, SE_FILE_OBJECT,
-                                   DACL_SECURITY_INFORMATION, NULL, NULL,
+    DWORD result = GetSecurityInfo(handle, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL,
                                    &dacl, NULL, &descriptor);
     ACL_SIZE_INFORMATION acl_information;
     memset(&acl_information, 0, sizeof(acl_information));
-    bool secure = result == ERROR_SUCCESS && descriptor && dacl &&
-                  IsValidAcl(dacl) != 0 &&
-                  GetAclInformation(dacl, &acl_information,
-                                    sizeof(acl_information),
-                                    AclSizeInformation) != 0;
-    const DWORD mutation_rights =
-        GENERIC_ALL | GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA |
-        FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
-        FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES | DELETE | WRITE_DAC |
-        WRITE_OWNER;
+    bool secure =
+        result == ERROR_SUCCESS && descriptor && dacl && IsValidAcl(dacl) != 0 &&
+        GetAclInformation(dacl, &acl_information, sizeof(acl_information), AclSizeInformation) != 0;
+    const DWORD mutation_rights = GENERIC_ALL | GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA |
+                                  FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD |
+                                  FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES | DELETE | WRITE_DAC |
+                                  WRITE_OWNER;
     enum {
         ACTIVATION_WINDOWS_ACE_ALLOW = 0x00,
         ACTIVATION_WINDOWS_ACE_DENY = 0x01,
@@ -383,8 +361,7 @@ static bool activation_windows_acl_secure(HANDLE handle) {
         if (header->AceType == ACTIVATION_WINDOWS_ACE_DENY ||
             header->AceType == ACTIVATION_WINDOWS_ACE_DENY_OBJECT ||
             header->AceType == ACTIVATION_WINDOWS_ACE_DENY_CALLBACK ||
-            header->AceType ==
-                ACTIVATION_WINDOWS_ACE_DENY_CALLBACK_OBJECT) {
+            header->AceType == ACTIVATION_WINDOWS_ACE_DENY_CALLBACK_OBJECT) {
             continue;
         }
         if (header->AceType != ACTIVATION_WINDOWS_ACE_ALLOW) {
@@ -406,12 +383,10 @@ static bool activation_windows_acl_secure(HANDLE handle) {
         }
         PSID sid = (PSID)&ace->SidStart;
         size_t sid_capacity = (size_t)header->AceSize - sid_offset;
-        DWORD sid_length = GetSidLengthRequired(
-            ((SID *)sid)->SubAuthorityCount);
+        DWORD sid_length = GetSidLengthRequired(((SID *)sid)->SubAuthorityCount);
         bool trusted = sid_length <= sid_capacity && IsValidSid(sid) &&
                        GetLengthSid(sid) == sid_length &&
-                       (EqualSid(sid, user_sid) ||
-                        IsWellKnownSid(sid, WinLocalSystemSid) ||
+                       (EqualSid(sid, user_sid) || IsWellKnownSid(sid, WinLocalSystemSid) ||
                         IsWellKnownSid(sid, WinBuiltinAdministratorsSid));
         if (!trusted) {
             secure = false;
@@ -424,18 +399,16 @@ static bool activation_windows_acl_secure(HANDLE handle) {
     return secure;
 }
 
-static bool activation_windows_identity(
-    HANDLE handle, activation_file_identity_t *identity_out,
-    bool require_regular) {
+static bool activation_windows_identity(HANDLE handle, activation_file_identity_t *identity_out,
+                                        bool require_regular) {
     BY_HANDLE_FILE_INFORMATION information;
     if (handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_DISK ||
         !GetFileInformationByHandle(handle, &information)) {
         return false;
     }
-    if (require_regular &&
-        ((information.dwFileAttributes &
-          (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-         information.nNumberOfLinks != 1)) {
+    if (require_regular && ((information.dwFileAttributes &
+                             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+                            information.nNumberOfLinks != 1)) {
         return false;
     }
     identity_out->volume_serial = information.dwVolumeSerialNumber;
@@ -444,15 +417,13 @@ static bool activation_windows_identity(
     return true;
 }
 
-static HANDLE activation_windows_directory_open_no_reparse(
-    const char *directory) {
+static HANDLE activation_windows_directory_open_no_reparse(const char *directory) {
     wchar_t *input = activation_utf8_to_wide(directory);
     if (!input) {
         return INVALID_HANDLE_VALUE;
     }
     DWORD needed = GetFullPathNameW(input, 0, NULL, NULL);
-    wchar_t *path = needed > 0 ? calloc((size_t)needed + 1U, sizeof(*path))
-                               : NULL;
+    wchar_t *path = needed > 0 ? calloc((size_t)needed + 1U, sizeof(*path)) : NULL;
     DWORD length = path ? GetFullPathNameW(input, needed + 1U, path, NULL) : 0;
     free(input);
     if (!path || length < 3 || length > needed || path[1] != L':' ||
@@ -470,22 +441,19 @@ static HANDLE activation_windows_directory_open_no_reparse(
         if (boundary < length && path[boundary] != L'\\') {
             continue;
         }
-        if (boundary < length && boundary > 0 &&
-            path[boundary - 1] == L'\\') {
+        if (boundary < length && boundary > 0 && path[boundary - 1] == L'\\') {
             free(path);
             return INVALID_HANDLE_VALUE;
         }
         wchar_t saved = path[boundary];
         path[boundary] = L'\0';
-        HANDLE handle = CreateFileW(
-            path, FILE_READ_ATTRIBUTES | READ_CONTROL,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        HANDLE handle =
+            CreateFileW(path, FILE_READ_ATTRIBUTES | READ_CONTROL,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
         path[boundary] = saved;
         BY_HANDLE_FILE_INFORMATION information;
-        bool valid = handle != INVALID_HANDLE_VALUE &&
-                     GetFileType(handle) == FILE_TYPE_DISK &&
+        bool valid = handle != INVALID_HANDLE_VALUE && GetFileType(handle) == FILE_TYPE_DISK &&
                      GetFileInformationByHandle(handle, &information) &&
                      (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
                      (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
@@ -506,19 +474,16 @@ static HANDLE activation_windows_directory_open_no_reparse(
     return final_handle;
 }
 
-static bool activation_directory_secure(
-    const char *directory, int *unused,
-    activation_file_identity_t *identity_out) {
+static bool activation_directory_secure(const char *directory, int *unused,
+                                        activation_file_identity_t *identity_out) {
     (void)unused;
     HANDLE handle = activation_windows_directory_open_no_reparse(directory);
     BY_HANDLE_FILE_INFORMATION information;
-    bool ok = handle != INVALID_HANDLE_VALUE &&
-              GetFileInformationByHandle(handle, &information) &&
+    bool ok = handle != INVALID_HANDLE_VALUE && GetFileInformationByHandle(handle, &information) &&
               (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
               (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 &&
               activation_windows_identity(handle, identity_out, false) &&
-              activation_windows_owner_is_current(handle) &&
-              activation_windows_acl_secure(handle);
+              activation_windows_owner_is_current(handle) && activation_windows_acl_secure(handle);
     if (handle != INVALID_HANDLE_VALUE) {
         (void)CloseHandle(handle);
     }
@@ -534,25 +499,22 @@ static bool activation_posix_acl_empty(int descriptor) {
 static char *activation_posix_walk_path(const char *directory) {
 #ifdef __APPLE__
     static const char *const aliases[] = {"/tmp", "/var"};
-    for (size_t index = 0; index < sizeof(aliases) / sizeof(aliases[0]);
-         index++) {
+    for (size_t index = 0; index < sizeof(aliases) / sizeof(aliases[0]); index++) {
         const char *alias = aliases[index];
         size_t alias_length = strlen(alias);
         if (strncmp(directory, alias, alias_length) != 0 ||
-            (directory[alias_length] != '\0' &&
-             directory[alias_length] != '/')) {
+            (directory[alias_length] != '\0' && directory[alias_length] != '/')) {
             continue;
         }
         struct stat alias_status;
         char resolved[4096];
-        if (lstat(alias, &alias_status) != 0 ||
-            !S_ISLNK(alias_status.st_mode) || alias_status.st_uid != 0 ||
-            !realpath(alias, resolved)) {
+        if (lstat(alias, &alias_status) != 0 || !S_ISLNK(alias_status.st_mode) ||
+            alias_status.st_uid != 0 || !realpath(alias, resolved)) {
             return NULL;
         }
         struct stat resolved_status;
-        if (lstat(resolved, &resolved_status) != 0 ||
-            !S_ISDIR(resolved_status.st_mode) || resolved_status.st_uid != 0) {
+        if (lstat(resolved, &resolved_status) != 0 || !S_ISDIR(resolved_status.st_mode) ||
+            resolved_status.st_uid != 0) {
             return NULL;
         }
         size_t needed = strlen(resolved) + strlen(directory + alias_length) + 1U;
@@ -560,8 +522,7 @@ static char *activation_posix_walk_path(const char *directory) {
         if (!mapped) {
             return NULL;
         }
-        int written = snprintf(mapped, needed, "%s%s", resolved,
-                               directory + alias_length);
+        int written = snprintf(mapped, needed, "%s%s", resolved, directory + alias_length);
         if (written <= 0 || (size_t)written >= needed) {
             free(mapped);
             return NULL;
@@ -575,15 +536,12 @@ static char *activation_posix_walk_path(const char *directory) {
 static bool activation_posix_intermediate_secure(const struct stat *status) {
     bool trusted_owner = status->st_uid == 0 || status->st_uid == geteuid();
     bool private_permissions = (status->st_mode & 0022) == 0;
-    bool root_sticky = status->st_uid == 0 &&
-                       (status->st_mode & S_ISVTX) != 0;
-    return S_ISDIR(status->st_mode) && trusted_owner &&
-           (private_permissions || root_sticky);
+    bool root_sticky = status->st_uid == 0 && (status->st_mode & S_ISVTX) != 0;
+    return S_ISDIR(status->st_mode) && trusted_owner && (private_permissions || root_sticky);
 }
 
-static bool activation_directory_secure(
-    const char *directory, int *directory_fd_out,
-    activation_file_identity_t *identity_out) {
+static bool activation_directory_secure(const char *directory, int *directory_fd_out,
+                                        activation_file_identity_t *identity_out) {
     int flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC;
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
@@ -623,8 +581,7 @@ static bool activation_directory_secure(
             while (*remaining == '/') {
                 remaining++;
             }
-            if (next_ok && *remaining &&
-                !activation_posix_intermediate_secure(&next_status)) {
+            if (next_ok && *remaining && !activation_posix_intermediate_secure(&next_status)) {
                 next_ok = false;
             }
             if (next_ok) {
@@ -643,9 +600,8 @@ static bool activation_directory_secure(
         }
     }
     struct stat status;
-    ok = ok && fstat(descriptor, &status) == 0 &&
-         S_ISDIR(status.st_mode) && status.st_uid == geteuid() &&
-         (status.st_mode & 0022) == 0 &&
+    ok = ok && fstat(descriptor, &status) == 0 && S_ISDIR(status.st_mode) &&
+         status.st_uid == geteuid() && (status.st_mode & 0022) == 0 &&
          activation_posix_acl_empty(descriptor);
     free(walk_path);
     if (!ok) {
@@ -662,21 +618,16 @@ static bool activation_directory_secure(
 
 #endif
 
-static bool activation_directory_still_valid(
-    const cbm_activation_transaction_t *transaction) {
+static bool activation_directory_still_valid(const cbm_activation_transaction_t *transaction) {
 #ifdef _WIN32
     int ignored = 0;
     activation_file_identity_t current;
-    return activation_directory_secure(transaction->directory_path, &ignored,
-                                       &current) &&
-           activation_identity_equal(&current,
-                                     &transaction->directory_identity);
+    return activation_directory_secure(transaction->directory_path, &ignored, &current) &&
+           activation_identity_equal(&current, &transaction->directory_identity);
 #else
     struct stat status;
-    if (transaction->directory_fd < 0 ||
-        fstat(transaction->directory_fd, &status) != 0 ||
-        !S_ISDIR(status.st_mode) || status.st_uid != geteuid() ||
-        (status.st_mode & 0022) != 0 ||
+    if (transaction->directory_fd < 0 || fstat(transaction->directory_fd, &status) != 0 ||
+        !S_ISDIR(status.st_mode) || status.st_uid != geteuid() || (status.st_mode & 0022) != 0 ||
         !activation_posix_acl_empty(transaction->directory_fd)) {
         return false;
     }
@@ -684,16 +635,14 @@ static bool activation_directory_still_valid(
         .device = status.st_dev,
         .inode = status.st_ino,
     };
-    if (!activation_identity_equal(&current,
-                                   &transaction->directory_identity)) {
+    if (!activation_identity_equal(&current, &transaction->directory_identity)) {
         return false;
     }
     int path_fd = -1;
     activation_file_identity_t path_identity;
-    bool path_same = activation_directory_secure(
-                         transaction->directory_path, &path_fd,
-                         &path_identity) &&
-                     activation_identity_equal(&path_identity, &current);
+    bool path_same =
+        activation_directory_secure(transaction->directory_path, &path_fd, &path_identity) &&
+        activation_identity_equal(&path_identity, &current);
     if (path_fd >= 0) {
         (void)close(path_fd);
     }
@@ -721,8 +670,8 @@ static bool activation_native_sync(activation_native_file_t file) {
 #endif
 }
 
-static bool activation_native_write_all(activation_native_file_t file,
-                                        const void *data, size_t length) {
+static bool activation_native_write_all(activation_native_file_t file, const void *data,
+                                        size_t length) {
     const unsigned char *cursor = data;
     while (length > 0) {
 #ifdef _WIN32
@@ -755,9 +704,8 @@ typedef enum {
 } activation_create_status_t;
 
 static activation_create_status_t activation_private_file_create(
-    const cbm_activation_transaction_t *transaction, const char *path,
-    const char *name, activation_native_file_t *file_out,
-    activation_file_identity_t *identity_out) {
+    const cbm_activation_transaction_t *transaction, const char *path, const char *name,
+    activation_native_file_t *file_out, activation_file_identity_t *identity_out) {
     *file_out = ACTIVATION_INVALID_FILE;
     if (!activation_directory_still_valid(transaction)) {
         return ACTIVATION_CREATE_ERROR;
@@ -770,17 +718,15 @@ static activation_create_status_t activation_private_file_create(
         return ACTIVATION_CREATE_ERROR;
     }
     SetLastError(ERROR_SUCCESS);
-    HANDLE file = CreateFileW(
-        wide, GENERIC_READ | GENERIC_WRITE | READ_CONTROL | DELETE,
-        FILE_SHARE_READ, &security.attributes, CREATE_NEW,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    HANDLE file = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE | READ_CONTROL | DELETE,
+                              FILE_SHARE_READ, &security.attributes, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     DWORD error = file == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
     free(wide);
     bool valid = file != INVALID_HANDLE_VALUE &&
                  SetHandleInformation(file, HANDLE_FLAG_INHERIT, 0) != 0 &&
                  activation_windows_identity(file, identity_out, true) &&
-                 activation_windows_owner_is_current(file) &&
-                 activation_windows_acl_secure(file);
+                 activation_windows_owner_is_current(file) && activation_windows_acl_secure(file);
     activation_windows_security_destroy(&security);
     if (!valid) {
         if (file != INVALID_HANDLE_VALUE) {
@@ -800,11 +746,9 @@ static activation_create_status_t activation_private_file_create(
     int file = openat(transaction->directory_fd, name, flags, 0700);
     int open_error = errno;
     struct stat status;
-    bool valid = file >= 0 && fchmod(file, 0700) == 0 &&
-                 fstat(file, &status) == 0 && S_ISREG(status.st_mode) &&
-                 status.st_uid == geteuid() && status.st_nlink == 1 &&
-                 (status.st_mode & 0777) == 0700 &&
-                 activation_posix_acl_empty(file);
+    bool valid = file >= 0 && fchmod(file, 0700) == 0 && fstat(file, &status) == 0 &&
+                 S_ISREG(status.st_mode) && status.st_uid == geteuid() && status.st_nlink == 1 &&
+                 (status.st_mode & 0777) == 0700 && activation_posix_acl_empty(file);
     if (!valid) {
         if (file >= 0) {
             (void)close(file);
@@ -820,9 +764,8 @@ static activation_create_status_t activation_private_file_create(
 }
 
 static cbm_activation_transaction_status_t activation_create_unique(
-    const cbm_activation_transaction_t *transaction, const char *tag,
-    char **path_out, char **name_out, activation_native_file_t *file_out,
-    activation_file_identity_t *identity_out) {
+    const cbm_activation_transaction_t *transaction, const char *tag, char **path_out,
+    char **name_out, activation_native_file_t *file_out, activation_file_identity_t *identity_out) {
     *path_out = NULL;
     *name_out = NULL;
     *file_out = ACTIVATION_INVALID_FILE;
@@ -836,8 +779,8 @@ static cbm_activation_transaction_status_t activation_create_unique(
             free(candidate);
             return CBM_ACTIVATION_TRANSACTION_NO_MEMORY;
         }
-        activation_create_status_t created = activation_private_file_create(
-            transaction, candidate, name, file_out, identity_out);
+        activation_create_status_t created =
+            activation_private_file_create(transaction, candidate, name, file_out, identity_out);
         if (created == ACTIVATION_CREATE_OK) {
             *path_out = candidate;
             *name_out = name;
@@ -853,9 +796,8 @@ static cbm_activation_transaction_status_t activation_create_unique(
 }
 
 #ifdef _WIN32
-static bool activation_external_snapshot(
-    const char *path, bool *exists_out,
-    activation_file_identity_t *identity_out) {
+static bool activation_external_snapshot(const char *path, bool *exists_out,
+                                         activation_file_identity_t *identity_out) {
     *exists_out = false;
     wchar_t *wide = activation_utf8_to_wide(path);
     if (!wide) {
@@ -867,20 +809,17 @@ static bool activation_external_snapshot(
         free(wide);
         return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
     }
-    if ((attributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+    if ((attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
         free(wide);
         return false;
     }
-    HANDLE handle = CreateFileW(
-        wide, FILE_READ_ATTRIBUTES | READ_CONTROL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    HANDLE handle = CreateFileW(wide, FILE_READ_ATTRIBUTES | READ_CONTROL,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     free(wide);
-    bool valid = handle != INVALID_HANDLE_VALUE &&
-                 activation_windows_identity(handle, identity_out, true) &&
-                 activation_windows_owner_is_current(handle) &&
-                 activation_windows_acl_secure(handle);
+    bool valid =
+        handle != INVALID_HANDLE_VALUE && activation_windows_identity(handle, identity_out, true) &&
+        activation_windows_owner_is_current(handle) && activation_windows_acl_secure(handle);
     if (handle != INVALID_HANDLE_VALUE) {
         (void)CloseHandle(handle);
     }
@@ -894,16 +833,14 @@ static bool activation_external_snapshot(
 
 #ifndef _WIN32
 static bool activation_posix_entry_snapshot_with_links(
-    const cbm_activation_transaction_t *transaction, const char *name,
-    nlink_t required_links, bool *exists_out,
-    activation_file_identity_t *identity_out) {
+    const cbm_activation_transaction_t *transaction, const char *name, nlink_t required_links,
+    bool *exists_out, activation_file_identity_t *identity_out) {
     *exists_out = false;
     if (!activation_directory_still_valid(transaction)) {
         return false;
     }
     struct stat before;
-    if (fstatat(transaction->directory_fd, name, &before,
-                AT_SYMLINK_NOFOLLOW) != 0) {
+    if (fstatat(transaction->directory_fd, name, &before, AT_SYMLINK_NOFOLLOW) != 0) {
         return errno == ENOENT;
     }
     if (!S_ISREG(before.st_mode) || before.st_uid != geteuid() ||
@@ -917,20 +854,14 @@ static bool activation_posix_entry_snapshot_with_links(
     int file = openat(transaction->directory_fd, name, flags);
     struct stat opened;
     struct stat after;
-    bool valid = file >= 0 && fstat(file, &opened) == 0 &&
-                 S_ISREG(opened.st_mode) && opened.st_uid == geteuid() &&
-                 opened.st_nlink == required_links &&
-                 (opened.st_mode & 0022) == 0 &&
-                 opened.st_dev == before.st_dev &&
-                 opened.st_ino == before.st_ino &&
-                 activation_posix_acl_empty(file) &&
-                 fstatat(transaction->directory_fd, name, &after,
-                         AT_SYMLINK_NOFOLLOW) == 0 &&
+    bool valid = file >= 0 && fstat(file, &opened) == 0 && S_ISREG(opened.st_mode) &&
+                 opened.st_uid == geteuid() && opened.st_nlink == required_links &&
+                 (opened.st_mode & 0022) == 0 && opened.st_dev == before.st_dev &&
+                 opened.st_ino == before.st_ino && activation_posix_acl_empty(file) &&
+                 fstatat(transaction->directory_fd, name, &after, AT_SYMLINK_NOFOLLOW) == 0 &&
                  S_ISREG(after.st_mode) && after.st_uid == geteuid() &&
-                 after.st_nlink == required_links &&
-                 (after.st_mode & 0022) == 0 &&
-                 after.st_dev == opened.st_dev &&
-                 after.st_ino == opened.st_ino;
+                 after.st_nlink == required_links && (after.st_mode & 0022) == 0 &&
+                 after.st_dev == opened.st_dev && after.st_ino == opened.st_ino;
     bool closed = file >= 0 && close(file) == 0;
     if (!valid || !closed) {
         return false;
@@ -942,24 +873,22 @@ static bool activation_posix_entry_snapshot_with_links(
 }
 #endif
 
-static bool activation_entry_snapshot(
-    const cbm_activation_transaction_t *transaction, const char *path,
-    const char *name, bool *exists_out,
-    activation_file_identity_t *identity_out) {
+static bool activation_entry_snapshot(const cbm_activation_transaction_t *transaction,
+                                      const char *path, const char *name, bool *exists_out,
+                                      activation_file_identity_t *identity_out) {
 #ifdef _WIN32
     return activation_directory_still_valid(transaction) &&
            activation_external_snapshot(path, exists_out, identity_out);
 #else
     (void)path;
-    return activation_posix_entry_snapshot_with_links(
-        transaction, name, (nlink_t)1, exists_out, identity_out);
+    return activation_posix_entry_snapshot_with_links(transaction, name, (nlink_t)1, exists_out,
+                                                      identity_out);
 #endif
 }
 
-static bool activation_path_matches(
-    const cbm_activation_transaction_t *transaction, const char *path,
-    const char *name, const activation_file_identity_t *expected,
-                                    bool *exists_out) {
+static bool activation_path_matches(const cbm_activation_transaction_t *transaction,
+                                    const char *path, const char *name,
+                                    const activation_file_identity_t *expected, bool *exists_out) {
     activation_file_identity_t actual;
     bool exists = false;
     if (!activation_entry_snapshot(transaction, path, name, &exists, &actual)) {
@@ -969,8 +898,7 @@ static bool activation_path_matches(
     return !exists || activation_identity_equal(&actual, expected);
 }
 
-static bool activation_sync_directory(
-    const cbm_activation_transaction_t *transaction) {
+static bool activation_sync_directory(const cbm_activation_transaction_t *transaction) {
 #ifdef _WIN32
     /* MoveFileExW(MOVEFILE_WRITE_THROUGH) is the strongest portable
      * directory-entry durability primitive available here. */
@@ -985,18 +913,16 @@ static bool activation_sync_directory(
 #endif
 }
 
-static bool activation_rename(
-    const cbm_activation_transaction_t *transaction, const char *source,
-    const char *source_name, const char *destination,
-    const char *destination_name, bool replace_destination) {
+static bool activation_rename(const cbm_activation_transaction_t *transaction, const char *source,
+                              const char *source_name, const char *destination,
+                              const char *destination_name, bool replace_destination) {
     if (!activation_directory_still_valid(transaction)) {
         return false;
     }
 #ifdef _WIN32
     wchar_t *wide_source = activation_utf8_to_wide(source);
     wchar_t *wide_destination = activation_utf8_to_wide(destination);
-    DWORD flags = MOVEFILE_WRITE_THROUGH |
-                  (replace_destination ? MOVEFILE_REPLACE_EXISTING : 0);
+    DWORD flags = MOVEFILE_WRITE_THROUGH | (replace_destination ? MOVEFILE_REPLACE_EXISTING : 0);
     bool ok = wide_source && wide_destination &&
               MoveFileExW(wide_source, wide_destination, flags) != 0 &&
               activation_directory_still_valid(transaction);
@@ -1009,8 +935,8 @@ static bool activation_rename(
     (void)replace_destination;
     int result;
     do {
-        result = renameat(transaction->directory_fd, source_name,
-                          transaction->directory_fd, destination_name);
+        result = renameat(transaction->directory_fd, source_name, transaction->directory_fd,
+                          destination_name);
     } while (result != 0 && errno == EINTR);
     return result == 0;
 #endif
@@ -1023,9 +949,8 @@ typedef enum {
 } activation_unlink_status_t;
 
 static activation_unlink_status_t activation_unlink_expected(
-    const cbm_activation_transaction_t *transaction, const char *path,
-    const char *name, const activation_file_identity_t *expected,
-    bool allow_windows_deferred) {
+    const cbm_activation_transaction_t *transaction, const char *path, const char *name,
+    const activation_file_identity_t *expected, bool allow_windows_deferred) {
     bool exists = false;
     if (!activation_path_matches(transaction, path, name, expected, &exists)) {
         return ACTIVATION_UNLINK_ERROR;
@@ -1044,8 +969,7 @@ static activation_unlink_status_t activation_unlink_expected(
     }
     DWORD error = GetLastError();
     bool deferred = allow_windows_deferred &&
-                    (error == ERROR_ACCESS_DENIED ||
-                     error == ERROR_SHARING_VIOLATION ||
+                    (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION ||
                      error == ERROR_LOCK_VIOLATION) &&
                     MoveFileExW(wide, NULL, MOVEFILE_DELAY_UNTIL_REBOOT) != 0;
     free(wide);
@@ -1056,13 +980,11 @@ static activation_unlink_status_t activation_unlink_expected(
     do {
         result = unlinkat(transaction->directory_fd, name, 0);
     } while (result != 0 && errno == EINTR);
-    return result == 0 || errno == ENOENT ? ACTIVATION_UNLINK_OK
-                                          : ACTIVATION_UNLINK_ERROR;
+    return result == 0 || errno == ENOENT ? ACTIVATION_UNLINK_OK : ACTIVATION_UNLINK_ERROR;
 #endif
 }
 
-static void activation_transaction_destroy(
-    cbm_activation_transaction_t *transaction) {
+static void activation_transaction_destroy(cbm_activation_transaction_t *transaction) {
     if (!transaction) {
         return;
     }
@@ -1103,8 +1025,7 @@ static cbm_activation_transaction_status_t activation_discard_staged_assets(
         }
     }
     ok = activation_sync_directory(transaction) && ok;
-    return ok ? CBM_ACTIVATION_TRANSACTION_OK
-              : CBM_ACTIVATION_TRANSACTION_IO;
+    return ok ? CBM_ACTIVATION_TRANSACTION_OK : CBM_ACTIVATION_TRANSACTION_IO;
 }
 
 static cbm_activation_transaction_status_t activation_transaction_prepare(
@@ -1135,25 +1056,22 @@ static cbm_activation_transaction_status_t activation_transaction_prepare(
     if (!activation_directory_secure(transaction->directory_path, &ignored,
                                      &transaction->directory_identity)) {
 #else
-    if (!activation_directory_secure(transaction->directory_path,
-                                     &transaction->directory_fd,
+    if (!activation_directory_secure(transaction->directory_path, &transaction->directory_fd,
                                      &transaction->directory_identity)) {
 #endif
         activation_transaction_destroy(transaction);
         return CBM_ACTIVATION_TRANSACTION_IO;
     }
-    if (!activation_entry_snapshot(
-            transaction, transaction->target_path, transaction->target_name,
-            &transaction->target_existed, &transaction->target_identity)) {
+    if (!activation_entry_snapshot(transaction, transaction->target_path, transaction->target_name,
+                                   &transaction->target_existed, &transaction->target_identity)) {
         activation_transaction_destroy(transaction);
         return CBM_ACTIVATION_TRANSACTION_IO;
     }
     if (transaction->target_existed) {
         activation_native_file_t reservation = ACTIVATION_INVALID_FILE;
         cbm_activation_transaction_status_t status = activation_create_unique(
-            transaction, "backup", &transaction->backup_path,
-            &transaction->backup_name, &reservation,
-            &transaction->backup_identity);
+            transaction, "backup", &transaction->backup_path, &transaction->backup_name,
+            &reservation, &transaction->backup_identity);
         if (status != CBM_ACTIVATION_TRANSACTION_OK) {
             activation_transaction_destroy(transaction);
             return status;
@@ -1171,8 +1089,7 @@ static cbm_activation_transaction_status_t activation_transaction_prepare(
     return CBM_ACTIVATION_TRANSACTION_OK;
 }
 
-static void activation_failed_stage_cleanup(
-    cbm_activation_transaction_t *transaction) {
+static void activation_failed_stage_cleanup(cbm_activation_transaction_t *transaction) {
     if (transaction) {
         (void)activation_discard_staged_assets(transaction);
         activation_transaction_destroy(transaction);
@@ -1189,15 +1106,15 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_bytes(
         return CBM_ACTIVATION_TRANSACTION_INVALID_ARGUMENT;
     }
     cbm_activation_transaction_t *transaction = NULL;
-    cbm_activation_transaction_status_t status = activation_transaction_prepare(
-        target_path, ACTIVATION_REPLACE, &transaction);
+    cbm_activation_transaction_status_t status =
+        activation_transaction_prepare(target_path, ACTIVATION_REPLACE, &transaction);
     if (status != CBM_ACTIVATION_TRANSACTION_OK) {
         return status;
     }
     activation_native_file_t staged = ACTIVATION_INVALID_FILE;
-    status = activation_create_unique(
-        transaction, "stage", &transaction->staged_path,
-        &transaction->staged_name, &staged, &transaction->staged_identity);
+    status =
+        activation_create_unique(transaction, "stage", &transaction->staged_path,
+                                 &transaction->staged_name, &staged, &transaction->staged_identity);
     if (status != CBM_ACTIVATION_TRANSACTION_OK) {
         activation_failed_stage_cleanup(transaction);
         return status;
@@ -1206,8 +1123,7 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_bytes(
     bool written = activation_native_write_all(staged, candidate, candidate_size);
     bool durable = written && activation_native_sync(staged);
     bool closed = activation_native_close(staged);
-    if (!written || !durable || !closed ||
-        !activation_sync_directory(transaction)) {
+    if (!written || !durable || !closed || !activation_sync_directory(transaction)) {
         activation_failed_stage_cleanup(transaction);
         return CBM_ACTIVATION_TRANSACTION_IO;
     }
@@ -1215,8 +1131,7 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_bytes(
     return CBM_ACTIVATION_TRANSACTION_OK;
 }
 
-static bool activation_source_open(const char *path,
-                                   activation_native_file_t *file_out) {
+static bool activation_source_open(const char *path, activation_native_file_t *file_out) {
     *file_out = ACTIVATION_INVALID_FILE;
     char *directory = NULL;
     char *name = NULL;
@@ -1240,23 +1155,18 @@ static bool activation_source_open(const char *path,
         free(name);
         return false;
     }
-    HANDLE file = CreateFileW(
-        wide, GENERIC_READ | FILE_READ_ATTRIBUTES | READ_CONTROL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
-        NULL);
+    HANDLE file =
+        CreateFileW(wide, GENERIC_READ | FILE_READ_ATTRIBUTES | READ_CONTROL,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     free(wide);
     activation_file_identity_t actual;
     activation_file_identity_t directory_now;
-    bool valid = file != INVALID_HANDLE_VALUE &&
-                 activation_windows_identity(file, &actual, true) &&
-                 activation_windows_owner_is_current(file) &&
-                 activation_windows_acl_secure(file) &&
+    bool valid = file != INVALID_HANDLE_VALUE && activation_windows_identity(file, &actual, true) &&
+                 activation_windows_owner_is_current(file) && activation_windows_acl_secure(file) &&
                  activation_identity_equal(&actual, &expected) &&
-                 activation_directory_secure(directory, &ignored,
-                                              &directory_now) &&
-                 activation_identity_equal(&directory_now,
-                                            &directory_identity);
+                 activation_directory_secure(directory, &ignored, &directory_now) &&
+                 activation_identity_equal(&directory_now, &directory_identity);
     if (!valid) {
         if (file != INVALID_HANDLE_VALUE) {
             (void)CloseHandle(file);
@@ -1268,31 +1178,25 @@ static bool activation_source_open(const char *path,
 #else
     int directory_fd = -1;
     activation_file_identity_t directory_identity;
-    if (!activation_directory_secure(directory, &directory_fd,
-                                     &directory_identity)) {
+    if (!activation_directory_secure(directory, &directory_fd, &directory_identity)) {
         free(directory);
         free(name);
         return false;
     }
     struct stat before;
-    bool before_valid =
-        fstatat(directory_fd, name, &before, AT_SYMLINK_NOFOLLOW) == 0 &&
-        S_ISREG(before.st_mode) && before.st_uid == geteuid() &&
-        before.st_nlink == 1 && (before.st_mode & 0022) == 0;
+    bool before_valid = fstatat(directory_fd, name, &before, AT_SYMLINK_NOFOLLOW) == 0 &&
+                        S_ISREG(before.st_mode) && before.st_uid == geteuid() &&
+                        before.st_nlink == 1 && (before.st_mode & 0022) == 0;
     int flags = O_RDONLY | O_CLOEXEC;
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
 #endif
     int file = before_valid ? openat(directory_fd, name, flags) : -1;
     struct stat information;
-    bool valid = file >= 0 && fstat(file, &information) == 0 &&
-                 S_ISREG(information.st_mode) &&
-                 information.st_uid == geteuid() &&
-                 information.st_nlink == 1 &&
-                 (information.st_mode & 0022) == 0 &&
-                 activation_posix_acl_empty(file) &&
-                 information.st_dev == before.st_dev &&
-                 information.st_ino == before.st_ino;
+    bool valid = file >= 0 && fstat(file, &information) == 0 && S_ISREG(information.st_mode) &&
+                 information.st_uid == geteuid() && information.st_nlink == 1 &&
+                 (information.st_mode & 0022) == 0 && activation_posix_acl_empty(file) &&
+                 information.st_dev == before.st_dev && information.st_ino == before.st_ino;
     (void)close(directory_fd);
     if (!valid) {
         if (file >= 0) {
@@ -1309,8 +1213,8 @@ static bool activation_source_open(const char *path,
     return true;
 }
 
-static bool activation_native_read(activation_native_file_t file, void *buffer,
-                                   size_t capacity, size_t *read_out) {
+static bool activation_native_read(activation_native_file_t file, void *buffer, size_t capacity,
+                                   size_t *read_out) {
 #ifdef _WIN32
     DWORD amount = 0;
     DWORD request = capacity > (size_t)UINT32_MAX ? UINT32_MAX : (DWORD)capacity;
@@ -1338,13 +1242,12 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
     if (transaction_out) {
         *transaction_out = NULL;
     }
-    if (!target_path || !candidate_path || !candidate_path[0] ||
-        !transaction_out) {
+    if (!target_path || !candidate_path || !candidate_path[0] || !transaction_out) {
         return CBM_ACTIVATION_TRANSACTION_INVALID_ARGUMENT;
     }
     cbm_activation_transaction_t *transaction = NULL;
-    cbm_activation_transaction_status_t status = activation_transaction_prepare(
-        target_path, ACTIVATION_REPLACE, &transaction);
+    cbm_activation_transaction_status_t status =
+        activation_transaction_prepare(target_path, ACTIVATION_REPLACE, &transaction);
     if (status != CBM_ACTIVATION_TRANSACTION_OK) {
         return status;
     }
@@ -1354,9 +1257,9 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
         return CBM_ACTIVATION_TRANSACTION_IO;
     }
     activation_native_file_t staged = ACTIVATION_INVALID_FILE;
-    status = activation_create_unique(
-        transaction, "stage", &transaction->staged_path,
-        &transaction->staged_name, &staged, &transaction->staged_identity);
+    status =
+        activation_create_unique(transaction, "stage", &transaction->staged_path,
+                                 &transaction->staged_name, &staged, &transaction->staged_identity);
     if (status != CBM_ACTIVATION_TRANSACTION_OK) {
         (void)activation_native_close(source);
         activation_failed_stage_cleanup(transaction);
@@ -1375,8 +1278,7 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
         if (amount == 0) {
             break;
         }
-        if (SIZE_MAX - total < amount ||
-            !activation_native_write_all(staged, buffer, amount)) {
+        if (SIZE_MAX - total < amount || !activation_native_write_all(staged, buffer, amount)) {
             copied = false;
             break;
         }
@@ -1385,8 +1287,8 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
     bool durable = copied && total > 0 && activation_native_sync(staged);
     bool source_closed = activation_native_close(source);
     bool staged_closed = activation_native_close(staged);
-    if (!copied || total == 0 || !durable || !source_closed ||
-        !staged_closed || !activation_sync_directory(transaction)) {
+    if (!copied || total == 0 || !durable || !source_closed || !staged_closed ||
+        !activation_sync_directory(transaction)) {
         activation_failed_stage_cleanup(transaction);
         return CBM_ACTIVATION_TRANSACTION_IO;
     }
@@ -1395,21 +1297,18 @@ cbm_activation_transaction_status_t cbm_activation_transaction_stage_file(
 }
 
 cbm_activation_transaction_status_t cbm_activation_transaction_stage_removal(
-    const char *target_path,
-    cbm_activation_transaction_t **transaction_out) {
+    const char *target_path, cbm_activation_transaction_t **transaction_out) {
     if (transaction_out) {
         *transaction_out = NULL;
     }
     if (!target_path || !transaction_out) {
         return CBM_ACTIVATION_TRANSACTION_INVALID_ARGUMENT;
     }
-    return activation_transaction_prepare(target_path, ACTIVATION_REMOVE,
-                                          transaction_out);
+    return activation_transaction_prepare(target_path, ACTIVATION_REMOVE, transaction_out);
 }
 
 #ifdef _WIN32
-static bool activation_windows_copy_target_to_backup(
-    cbm_activation_transaction_t *transaction) {
+static bool activation_windows_copy_target_to_backup(cbm_activation_transaction_t *transaction) {
     if (!activation_directory_still_valid(transaction)) {
         return false;
     }
@@ -1420,33 +1319,26 @@ static bool activation_windows_copy_target_to_backup(
         free(backup_path);
         return false;
     }
-    HANDLE target = CreateFileW(
-        target_path, GENERIC_READ | FILE_READ_ATTRIBUTES | READ_CONTROL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
-        NULL);
-    HANDLE backup = CreateFileW(
-        backup_path,
-        GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | READ_CONTROL,
-        FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
-        NULL);
+    HANDLE target =
+        CreateFileW(target_path, GENERIC_READ | FILE_READ_ATTRIBUTES | READ_CONTROL,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    HANDLE backup =
+        CreateFileW(backup_path, GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | READ_CONTROL,
+                    FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     free(target_path);
     free(backup_path);
     activation_file_identity_t target_identity;
     activation_file_identity_t backup_identity;
     LARGE_INTEGER beginning = {.QuadPart = 0};
-    bool valid = target != INVALID_HANDLE_VALUE &&
-                 backup != INVALID_HANDLE_VALUE &&
+    bool valid = target != INVALID_HANDLE_VALUE && backup != INVALID_HANDLE_VALUE &&
                  activation_windows_identity(target, &target_identity, true) &&
                  activation_windows_identity(backup, &backup_identity, true) &&
                  activation_windows_owner_is_current(target) &&
                  activation_windows_owner_is_current(backup) &&
-                 activation_windows_acl_secure(target) &&
-                 activation_windows_acl_secure(backup) &&
-                 activation_identity_equal(&target_identity,
-                                           &transaction->target_identity) &&
-                 activation_identity_equal(&backup_identity,
-                                           &transaction->backup_identity) &&
+                 activation_windows_acl_secure(target) && activation_windows_acl_secure(backup) &&
+                 activation_identity_equal(&target_identity, &transaction->target_identity) &&
+                 activation_identity_equal(&backup_identity, &transaction->backup_identity) &&
                  SetFilePointerEx(backup, beginning, NULL, FILE_BEGIN) != 0 &&
                  SetEndOfFile(backup) != 0;
     unsigned char buffer[64U * 1024U];
@@ -1461,8 +1353,7 @@ static bool activation_windows_copy_target_to_backup(
     valid = valid && activation_native_sync(backup);
     bool target_closed = target != INVALID_HANDLE_VALUE && CloseHandle(target) != 0;
     bool backup_closed = backup != INVALID_HANDLE_VALUE && CloseHandle(backup) != 0;
-    return valid && target_closed && backup_closed &&
-           activation_directory_still_valid(transaction);
+    return valid && target_closed && backup_closed && activation_directory_still_valid(transaction);
 }
 #endif
 
@@ -1499,8 +1390,7 @@ static activation_publish_status_t activation_publish_absent_link_fallback(
     int linked;
     do {
         linked = linkat(transaction->directory_fd, transaction->staged_name,
-                        transaction->directory_fd, transaction->target_name,
-                        0);
+                        transaction->directory_fd, transaction->target_name, 0);
     } while (linked != 0 && errno == EINTR);
     if (linked != 0) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
@@ -1511,26 +1401,20 @@ static activation_publish_status_t activation_publish_absent_link_fallback(
     bool staged_exists = false;
     bool target_exists = false;
     bool linked_pair =
-        activation_posix_entry_snapshot_with_links(
-            transaction, transaction->staged_name, (nlink_t)2,
-            &staged_exists, &staged_identity) &&
+        activation_posix_entry_snapshot_with_links(transaction, transaction->staged_name,
+                                                   (nlink_t)2, &staged_exists, &staged_identity) &&
         staged_exists &&
-        activation_identity_equal(&staged_identity,
-                                  &transaction->staged_identity) &&
-        activation_posix_entry_snapshot_with_links(
-            transaction, transaction->target_name, (nlink_t)2,
-            &target_exists, &target_identity) &&
-        target_exists &&
-        activation_identity_equal(&target_identity,
-                                  &transaction->staged_identity);
+        activation_identity_equal(&staged_identity, &transaction->staged_identity) &&
+        activation_posix_entry_snapshot_with_links(transaction, transaction->target_name,
+                                                   (nlink_t)2, &target_exists, &target_identity) &&
+        target_exists && activation_identity_equal(&target_identity, &transaction->staged_identity);
     if (!linked_pair) {
         return ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
 
     int removed;
     do {
-        removed = unlinkat(transaction->directory_fd,
-                           transaction->staged_name, 0);
+        removed = unlinkat(transaction->directory_fd, transaction->staged_name, 0);
     } while (removed != 0 && errno == EINTR);
     if (removed != 0 && errno != ENOENT) {
         return ACTIVATION_PUBLISH_CHANGED_ERROR;
@@ -1539,12 +1423,11 @@ static activation_publish_status_t activation_publish_absent_link_fallback(
 
     activation_file_identity_t published_identity;
     bool published_exists = false;
-    if (!activation_posix_entry_snapshot_with_links(
-            transaction, transaction->target_name, (nlink_t)1,
-            &published_exists, &published_identity) ||
+    if (!activation_posix_entry_snapshot_with_links(transaction, transaction->target_name,
+                                                    (nlink_t)1, &published_exists,
+                                                    &published_identity) ||
         !published_exists ||
-        !activation_identity_equal(&published_identity,
-                                   &transaction->staged_identity)) {
+        !activation_identity_equal(&published_identity, &transaction->staged_identity)) {
         return ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
     return ACTIVATION_PUBLISH_OK;
@@ -1555,10 +1438,8 @@ static activation_publish_status_t activation_finish_absent_publish(
     cbm_activation_transaction_t *transaction) {
     transaction->staged_exists = false;
     bool target_exists = false;
-    return activation_path_matches(
-               transaction, transaction->target_path,
-               transaction->target_name, &transaction->staged_identity,
-               &target_exists) &&
+    return activation_path_matches(transaction, transaction->target_path, transaction->target_name,
+                                   &transaction->staged_identity, &target_exists) &&
                    target_exists
                ? ACTIVATION_PUBLISH_OK
                : ACTIVATION_PUBLISH_CHANGED_ERROR;
@@ -1570,19 +1451,16 @@ static activation_publish_status_t activation_publish_absent_replacement(
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
     bool staged_exists = false;
-    if (!activation_path_matches(
-            transaction, transaction->staged_path,
-            transaction->staged_name, &transaction->staged_identity,
-            &staged_exists) ||
+    if (!activation_path_matches(transaction, transaction->staged_path, transaction->staged_name,
+                                 &transaction->staged_identity, &staged_exists) ||
         !staged_exists) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
 #ifdef _WIN32
     wchar_t *source = activation_utf8_to_wide(transaction->staged_path);
     wchar_t *destination = activation_utf8_to_wide(transaction->target_path);
-    bool published = source && destination &&
-                     MoveFileExW(source, destination,
-                                 MOVEFILE_WRITE_THROUGH) != 0;
+    bool published =
+        source && destination && MoveFileExW(source, destination, MOVEFILE_WRITE_THROUGH) != 0;
     free(source);
     free(destination);
     if (!published) {
@@ -1592,10 +1470,8 @@ static activation_publish_status_t activation_publish_absent_replacement(
 #elif defined(__APPLE__)
     int renamed;
     do {
-        renamed = renameatx_np(transaction->directory_fd,
-                               transaction->staged_name,
-                               transaction->directory_fd,
-                               transaction->target_name, RENAME_EXCL);
+        renamed = renameatx_np(transaction->directory_fd, transaction->staged_name,
+                               transaction->directory_fd, transaction->target_name, RENAME_EXCL);
     } while (renamed != 0 && errno == EINTR);
     if (renamed == 0) {
         return activation_finish_absent_publish(transaction);
@@ -1608,10 +1484,8 @@ static activation_publish_status_t activation_publish_absent_replacement(
     const unsigned int rename_noreplace = 1U;
     long renamed;
     do {
-        renamed = syscall(SYS_renameat2, transaction->directory_fd,
-                          transaction->staged_name,
-                          transaction->directory_fd,
-                          transaction->target_name, rename_noreplace);
+        renamed = syscall(SYS_renameat2, transaction->directory_fd, transaction->staged_name,
+                          transaction->directory_fd, transaction->target_name, rename_noreplace);
     } while (renamed != 0 && errno == EINTR);
     if (renamed == 0) {
         return activation_finish_absent_publish(transaction);
@@ -1626,35 +1500,30 @@ static activation_publish_status_t activation_publish_absent_replacement(
 }
 
 #ifndef _WIN32
-static bool activation_linked_backup_pair_valid(
-    const cbm_activation_transaction_t *transaction) {
+static bool activation_linked_backup_pair_valid(const cbm_activation_transaction_t *transaction) {
     activation_file_identity_t target_identity;
     activation_file_identity_t backup_identity;
     bool target_exists = false;
     bool backup_exists = false;
-    return activation_posix_entry_snapshot_with_links(
-               transaction, transaction->target_name, (nlink_t)2,
-               &target_exists, &target_identity) &&
+    return activation_posix_entry_snapshot_with_links(transaction, transaction->target_name,
+                                                      (nlink_t)2, &target_exists,
+                                                      &target_identity) &&
            target_exists &&
-           activation_identity_equal(&target_identity,
-                                     &transaction->target_identity) &&
-           activation_posix_entry_snapshot_with_links(
-               transaction, transaction->backup_name, (nlink_t)2,
-               &backup_exists, &backup_identity) &&
+           activation_identity_equal(&target_identity, &transaction->target_identity) &&
+           activation_posix_entry_snapshot_with_links(transaction, transaction->backup_name,
+                                                      (nlink_t)2, &backup_exists,
+                                                      &backup_identity) &&
            backup_exists &&
-           activation_identity_equal(&backup_identity,
-                                     &transaction->target_identity);
+           activation_identity_equal(&backup_identity, &transaction->target_identity);
 }
 
-static bool activation_remove_linked_backup(
-    cbm_activation_transaction_t *transaction) {
+static bool activation_remove_linked_backup(cbm_activation_transaction_t *transaction) {
     if (!activation_linked_backup_pair_valid(transaction)) {
         return false;
     }
     int result;
     do {
-        result = unlinkat(transaction->directory_fd,
-                          transaction->backup_name, 0);
+        result = unlinkat(transaction->directory_fd, transaction->backup_name, 0);
     } while (result != 0 && errno == EINTR);
     if (result == 0) {
         transaction->backup_exists = false;
@@ -1675,31 +1544,29 @@ static activation_publish_status_t activation_publish_existing_replacement(
     if (!activation_windows_copy_target_to_backup(transaction)) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
-    if (!activation_rename(
-            transaction, transaction->staged_path, transaction->staged_name,
-            transaction->target_path, transaction->target_name, true)) {
+    if (!activation_rename(transaction, transaction->staged_path, transaction->staged_name,
+                           transaction->target_path, transaction->target_name, true)) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
     transaction->staged_exists = false;
     transaction->backup_contains_target = true;
     bool target_exists = false;
-    if (!activation_path_matches(
-            transaction, transaction->target_path, transaction->target_name,
-            &transaction->staged_identity, &target_exists) ||
+    if (!activation_path_matches(transaction, transaction->target_path, transaction->target_name,
+                                 &transaction->staged_identity, &target_exists) ||
         !target_exists) {
         return ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
 #else
-    activation_unlink_status_t reservation_removed = activation_unlink_expected(
-        transaction, transaction->backup_path, transaction->backup_name,
-        &transaction->backup_identity, false);
+    activation_unlink_status_t reservation_removed =
+        activation_unlink_expected(transaction, transaction->backup_path, transaction->backup_name,
+                                   &transaction->backup_identity, false);
     if (reservation_removed != ACTIVATION_UNLINK_OK) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
     transaction->backup_exists = false;
     if (!activation_directory_still_valid(transaction) ||
-        linkat(transaction->directory_fd, transaction->target_name,
-               transaction->directory_fd, transaction->backup_name, 0) != 0) {
+        linkat(transaction->directory_fd, transaction->target_name, transaction->directory_fd,
+               transaction->backup_name, 0) != 0) {
         return ACTIVATION_PUBLISH_UNCHANGED_ERROR;
     }
     transaction->backup_exists = true;
@@ -1707,54 +1574,43 @@ static activation_publish_status_t activation_publish_existing_replacement(
     transaction->backup_identity = transaction->target_identity;
     bool staged_exists = false;
     if (!activation_linked_backup_pair_valid(transaction) ||
-        !activation_path_matches(
-            transaction, transaction->staged_path,
-            transaction->staged_name, &transaction->staged_identity,
-            &staged_exists) ||
+        !activation_path_matches(transaction, transaction->staged_path, transaction->staged_name,
+                                 &transaction->staged_identity, &staged_exists) ||
         !staged_exists) {
-        return activation_remove_linked_backup(transaction)
-                   ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
-                   : ACTIVATION_PUBLISH_CHANGED_ERROR;
+        return activation_remove_linked_backup(transaction) ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
+                                                            : ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
     if (!activation_sync_directory(transaction)) {
-        return activation_remove_linked_backup(transaction)
-                   ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
-                   : ACTIVATION_PUBLISH_CHANGED_ERROR;
+        return activation_remove_linked_backup(transaction) ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
+                                                            : ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
-    if (!activation_rename(
-            transaction, transaction->staged_path, transaction->staged_name,
-            transaction->target_path, transaction->target_name, true)) {
-        return activation_remove_linked_backup(transaction)
-                   ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
-                   : ACTIVATION_PUBLISH_CHANGED_ERROR;
+    if (!activation_rename(transaction, transaction->staged_path, transaction->staged_name,
+                           transaction->target_path, transaction->target_name, true)) {
+        return activation_remove_linked_backup(transaction) ? ACTIVATION_PUBLISH_UNCHANGED_ERROR
+                                                            : ACTIVATION_PUBLISH_CHANGED_ERROR;
     }
     transaction->staged_exists = false;
 #endif
     return ACTIVATION_PUBLISH_OK;
 }
 
-static bool activation_target_still_original(
-    const cbm_activation_transaction_t *transaction) {
+static bool activation_target_still_original(const cbm_activation_transaction_t *transaction) {
     activation_file_identity_t current;
     bool exists = false;
-    if (!activation_entry_snapshot(
-            transaction, transaction->target_path, transaction->target_name,
-            &exists, &current) ||
+    if (!activation_entry_snapshot(transaction, transaction->target_path, transaction->target_name,
+                                   &exists, &current) ||
         exists != transaction->target_existed) {
         return false;
     }
-    return !exists || activation_identity_equal(&current,
-                                                 &transaction->target_identity);
+    return !exists || activation_identity_equal(&current, &transaction->target_identity);
 }
 
-static bool activation_absent_target_snapshot(
-    const cbm_activation_transaction_t *transaction, bool *exists_out,
-    bool *linked_pair_out) {
+static bool activation_absent_target_snapshot(const cbm_activation_transaction_t *transaction,
+                                              bool *exists_out, bool *linked_pair_out) {
     *exists_out = false;
     *linked_pair_out = false;
-    if (activation_path_matches(
-            transaction, transaction->target_path, transaction->target_name,
-            &transaction->staged_identity, exists_out)) {
+    if (activation_path_matches(transaction, transaction->target_path, transaction->target_name,
+                                &transaction->staged_identity, exists_out)) {
         return true;
     }
 #ifndef _WIN32
@@ -1765,18 +1621,14 @@ static bool activation_absent_target_snapshot(
     activation_file_identity_t target_identity;
     bool staged_exists = false;
     bool target_exists = false;
-    if (!activation_posix_entry_snapshot_with_links(
-            transaction, transaction->target_name, (nlink_t)2,
-            &target_exists, &target_identity) ||
+    if (!activation_posix_entry_snapshot_with_links(transaction, transaction->target_name,
+                                                    (nlink_t)2, &target_exists, &target_identity) ||
         !target_exists ||
-        !activation_identity_equal(&target_identity,
-                                   &transaction->staged_identity) ||
-        !activation_posix_entry_snapshot_with_links(
-            transaction, transaction->staged_name, (nlink_t)2,
-            &staged_exists, &staged_identity) ||
+        !activation_identity_equal(&target_identity, &transaction->staged_identity) ||
+        !activation_posix_entry_snapshot_with_links(transaction, transaction->staged_name,
+                                                    (nlink_t)2, &staged_exists, &staged_identity) ||
         !staged_exists ||
-        !activation_identity_equal(&staged_identity,
-                                   &transaction->staged_identity)) {
+        !activation_identity_equal(&staged_identity, &transaction->staged_identity)) {
         return false;
     }
     *exists_out = true;
@@ -1787,26 +1639,23 @@ static bool activation_absent_target_snapshot(
 #endif
 }
 
-static bool activation_remove_absent_published_target(
-    cbm_activation_transaction_t *transaction, bool linked_pair) {
+static bool activation_remove_absent_published_target(cbm_activation_transaction_t *transaction,
+                                                      bool linked_pair) {
     if (!linked_pair) {
-        return activation_unlink_expected(
-                   transaction, transaction->target_path,
-                   transaction->target_name, &transaction->staged_identity,
-                   false) == ACTIVATION_UNLINK_OK;
+        return activation_unlink_expected(transaction, transaction->target_path,
+                                          transaction->target_name, &transaction->staged_identity,
+                                          false) == ACTIVATION_UNLINK_OK;
     }
 #ifndef _WIN32
     bool target_exists = false;
     bool still_linked = false;
-    if (!activation_absent_target_snapshot(transaction, &target_exists,
-                                           &still_linked) ||
+    if (!activation_absent_target_snapshot(transaction, &target_exists, &still_linked) ||
         !target_exists || !still_linked) {
         return false;
     }
     int removed;
     do {
-        removed = unlinkat(transaction->directory_fd,
-                           transaction->target_name, 0);
+        removed = unlinkat(transaction->directory_fd, transaction->target_name, 0);
     } while (removed != 0 && errno == EINTR);
     if (removed != 0) {
         return false;
@@ -1815,15 +1664,14 @@ static bool activation_remove_absent_published_target(
     bool staged_exists = false;
     activation_file_identity_t absent_identity;
     bool target_remains = false;
-    return activation_posix_entry_snapshot_with_links(
-               transaction, transaction->staged_name, (nlink_t)1,
-               &staged_exists, &staged_identity) &&
+    return activation_posix_entry_snapshot_with_links(transaction, transaction->staged_name,
+                                                      (nlink_t)1, &staged_exists,
+                                                      &staged_identity) &&
            staged_exists &&
-           activation_identity_equal(&staged_identity,
-                                     &transaction->staged_identity) &&
-           activation_posix_entry_snapshot_with_links(
-               transaction, transaction->target_name, (nlink_t)1,
-               &target_remains, &absent_identity) &&
+           activation_identity_equal(&staged_identity, &transaction->staged_identity) &&
+           activation_posix_entry_snapshot_with_links(transaction, transaction->target_name,
+                                                      (nlink_t)1, &target_remains,
+                                                      &absent_identity) &&
            !target_remains;
 #else
     return false;
@@ -1835,33 +1683,28 @@ static cbm_activation_transaction_status_t activation_rollback_internal(
     if (transaction->target_existed) {
         bool backup_exists = false;
         if (!transaction->backup_contains_target ||
-            !activation_path_matches(
-                transaction, transaction->backup_path,
-                transaction->backup_name, &transaction->backup_identity,
-                &backup_exists) ||
+            !activation_path_matches(transaction, transaction->backup_path,
+                                     transaction->backup_name, &transaction->backup_identity,
+                                     &backup_exists) ||
             !backup_exists) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
         bool target_exists = false;
         activation_file_identity_t current_target;
-        if (!activation_entry_snapshot(
-                transaction, transaction->target_path,
-                transaction->target_name, &target_exists, &current_target)) {
+        if (!activation_entry_snapshot(transaction, transaction->target_path,
+                                       transaction->target_name, &target_exists, &current_target)) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
         if (target_exists &&
             (transaction->action != ACTIVATION_REPLACE ||
-             !activation_identity_equal(&current_target,
-                                        &transaction->staged_identity))) {
+             !activation_identity_equal(&current_target, &transaction->staged_identity))) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
-        if (!activation_rename(
-                transaction, transaction->backup_path,
-                transaction->backup_name, transaction->target_path,
-                transaction->target_name, target_exists)) {
+        if (!activation_rename(transaction, transaction->backup_path, transaction->backup_name,
+                               transaction->target_path, transaction->target_name, target_exists)) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
@@ -1870,26 +1713,22 @@ static cbm_activation_transaction_status_t activation_rollback_internal(
     } else if (transaction->action == ACTIVATION_REPLACE) {
         bool target_exists = false;
         bool linked_pair = false;
-        if (!activation_absent_target_snapshot(transaction, &target_exists,
-                                               &linked_pair)) {
+        if (!activation_absent_target_snapshot(transaction, &target_exists, &linked_pair)) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
-        if (target_exists && !activation_remove_absent_published_target(
-                                 transaction, linked_pair)) {
+        if (target_exists && !activation_remove_absent_published_target(transaction, linked_pair)) {
             transaction->state = ACTIVATION_RECOVERY_NEEDED;
             return CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
         }
     }
     transaction->state = ACTIVATION_ROLLED_BACK;
-    return activation_sync_directory(transaction)
-               ? CBM_ACTIVATION_TRANSACTION_OK
-               : CBM_ACTIVATION_TRANSACTION_IO;
+    return activation_sync_directory(transaction) ? CBM_ACTIVATION_TRANSACTION_OK
+                                                  : CBM_ACTIVATION_TRANSACTION_IO;
 }
 
 cbm_activation_transaction_status_t cbm_activation_transaction_commit(
-    cbm_activation_transaction_t *transaction,
-    cbm_activation_transaction_validator_fn validator,
+    cbm_activation_transaction_t *transaction, cbm_activation_transaction_validator_fn validator,
     void *validator_context) {
     if (!transaction) {
         return CBM_ACTIVATION_TRANSACTION_INVALID_ARGUMENT;
@@ -1903,10 +1742,9 @@ cbm_activation_transaction_status_t cbm_activation_transaction_commit(
     if (transaction->action == ACTIVATION_REPLACE) {
         bool staged_exists = false;
         if (!transaction->staged_exists ||
-            !activation_path_matches(
-                transaction, transaction->staged_path,
-                transaction->staged_name, &transaction->staged_identity,
-                &staged_exists) ||
+            !activation_path_matches(transaction, transaction->staged_path,
+                                     transaction->staged_name, &transaction->staged_identity,
+                                     &staged_exists) ||
             !staged_exists) {
             return CBM_ACTIVATION_TRANSACTION_IO;
         }
@@ -1929,30 +1767,24 @@ cbm_activation_transaction_status_t cbm_activation_transaction_commit(
         } else {
             bool reservation_exists = false;
             if (!transaction->backup_exists ||
-                !activation_path_matches(
-                    transaction, transaction->backup_path,
-                    transaction->backup_name, &transaction->backup_identity,
-                    &reservation_exists) ||
+                !activation_path_matches(transaction, transaction->backup_path,
+                                         transaction->backup_name, &transaction->backup_identity,
+                                         &reservation_exists) ||
                 !reservation_exists ||
-                !activation_rename(
-                    transaction, transaction->target_path,
-                    transaction->target_name, transaction->backup_path,
-                    transaction->backup_name, true)) {
+                !activation_rename(transaction, transaction->target_path, transaction->target_name,
+                                   transaction->backup_path, transaction->backup_name, true)) {
                 return CBM_ACTIVATION_TRANSACTION_IO;
             }
             transaction->backup_identity = transaction->target_identity;
             transaction->backup_contains_target = true;
         }
     }
-    if (transaction->action == ACTIVATION_REPLACE &&
-        !transaction->target_existed) {
+    if (transaction->action == ACTIVATION_REPLACE && !transaction->target_existed) {
         if (activation_before_absent_publish_for_test) {
             activation_before_absent_publish_for_test(
-                transaction->target_path,
-                activation_before_absent_publish_context_for_test);
+                transaction->target_path, activation_before_absent_publish_context_for_test);
         }
-        activation_publish_status_t published =
-            activation_publish_absent_replacement(transaction);
+        activation_publish_status_t published = activation_publish_absent_replacement(transaction);
         if (published == ACTIVATION_PUBLISH_UNCHANGED_ERROR) {
             return CBM_ACTIVATION_TRANSACTION_IO;
         }
@@ -1966,17 +1798,14 @@ cbm_activation_transaction_status_t cbm_activation_transaction_commit(
         }
     }
     transaction->state = ACTIVATION_COMMITTED;
-    if (!activation_directory_still_valid(transaction) ||
-        !activation_sync_directory(transaction)) {
-        cbm_activation_transaction_status_t restored =
-            activation_rollback_internal(transaction);
+    if (!activation_directory_still_valid(transaction) || !activation_sync_directory(transaction)) {
+        cbm_activation_transaction_status_t restored = activation_rollback_internal(transaction);
         return restored == CBM_ACTIVATION_TRANSACTION_OK
                    ? CBM_ACTIVATION_TRANSACTION_IO
                    : CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
     }
     if (validator && !validator(transaction->target_path, validator_context)) {
-        cbm_activation_transaction_status_t restored =
-            activation_rollback_internal(transaction);
+        cbm_activation_transaction_status_t restored = activation_rollback_internal(transaction);
         return restored == CBM_ACTIVATION_TRANSACTION_OK
                    ? CBM_ACTIVATION_TRANSACTION_VALIDATION_FAILED
                    : CBM_ACTIVATION_TRANSACTION_ROLLBACK_FAILED;
@@ -2037,16 +1866,13 @@ cbm_activation_transaction_status_t cbm_activation_transaction_close(
     cbm_activation_transaction_t *transaction = *transaction_io;
     if (transaction->state == ACTIVATION_COMMITTED ||
         transaction->state == ACTIVATION_RECOVERY_NEEDED) {
-        cbm_activation_transaction_status_t status =
-            activation_rollback_internal(transaction);
+        cbm_activation_transaction_status_t status = activation_rollback_internal(transaction);
         if (status != CBM_ACTIVATION_TRANSACTION_OK) {
             return status;
         }
     }
-    if (transaction->state == ACTIVATION_STAGED ||
-        transaction->state == ACTIVATION_ROLLED_BACK) {
-        cbm_activation_transaction_status_t status =
-            activation_discard_staged_assets(transaction);
+    if (transaction->state == ACTIVATION_STAGED || transaction->state == ACTIVATION_ROLLED_BACK) {
+        cbm_activation_transaction_status_t status = activation_discard_staged_assets(transaction);
         if (status != CBM_ACTIVATION_TRANSACTION_OK) {
             return status;
         }
@@ -2073,13 +1899,10 @@ const char *cbm_activation_transaction_backup_path(
 
 const char *cbm_activation_transaction_deferred_path(
     const cbm_activation_transaction_t *transaction) {
-    return transaction && transaction->deferred_cleanup
-               ? transaction->backup_path
-               : NULL;
+    return transaction && transaction->deferred_cleanup ? transaction->backup_path : NULL;
 }
 
-const char *cbm_activation_transaction_status_message(
-    cbm_activation_transaction_status_t status) {
+const char *cbm_activation_transaction_status_message(cbm_activation_transaction_status_t status) {
     switch (status) {
     case CBM_ACTIVATION_TRANSACTION_OK:
         return "activation transaction completed";

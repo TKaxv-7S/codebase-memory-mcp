@@ -1326,12 +1326,12 @@ cbm_cross_repo_result_t cbm_cross_repo_match_cancellable(const char *project,
     result.elapsed_ms = ((double)(t1.tv_sec - t0.tv_sec) * CR_MS_PER_SEC) +
                         ((double)(t1.tv_nsec - t0.tv_nsec) / CR_NS_PER_MS);
 
-    int total = result.http_edges + result.async_edges + result.channel_edges + result.grpc_edges +
-                result.graphql_edges + result.trpc_edges;
     if (result.cancelled) {
         cbm_log_info("cross_repo.cancelled", "project", project, "partial_results",
                      result.partial_results ? "true" : "false");
     } else {
+        int total = result.http_edges + result.async_edges + result.channel_edges +
+                    result.grpc_edges + result.graphql_edges + result.trpc_edges;
         cbm_log_info("cross_repo.done", "project", project, "total", cr_itoa(total));
     }
 

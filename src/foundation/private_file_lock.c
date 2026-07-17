@@ -128,8 +128,7 @@ void cbm_private_fork_condition_free(cbm_private_fork_condition_t *condition) {
     free(condition);
 }
 
-void cbm_private_fork_condition_broadcast_while_guarded(
-    cbm_private_fork_condition_t *condition) {
+void cbm_private_fork_condition_broadcast_while_guarded(cbm_private_fork_condition_t *condition) {
     if (condition) {
         (void)pthread_cond_broadcast(&condition->value);
     }
@@ -150,8 +149,8 @@ cbm_private_fork_wait_status_t cbm_private_fork_condition_wait_until_while_guard
         uint64_t remaining_ms = deadline_ms > now_ms ? deadline_ms - now_ms : 0;
         timeout.tv_sec = (time_t)(remaining_ms / 1000U);
         timeout.tv_nsec = (long)((remaining_ms % 1000U) * 1000000U);
-        status = pthread_cond_timedwait_relative_np(&condition->value, &private_fork_mutex,
-                                                    &timeout);
+        status =
+            pthread_cond_timedwait_relative_np(&condition->value, &private_fork_mutex, &timeout);
 #else
         timeout.tv_sec = (time_t)(deadline_ms / 1000U);
         timeout.tv_nsec = (long)((deadline_ms % 1000U) * 1000000U);
@@ -276,8 +275,7 @@ cbm_private_file_lock_status_t cbm_private_lock_directory_adopt_posix(
         !S_ISDIR(status.st_mode) || !S_ISDIR(by_path.st_mode) || status.st_uid != geteuid() ||
         by_path.st_uid != geteuid() || (status.st_mode & 07777) != 0700 ||
         (by_path.st_mode & 07777) != 0700 || status.st_dev != by_path.st_dev ||
-        status.st_ino != by_path.st_ino ||
-        !cbm_macos_extended_acl_fd_is_empty(directory_fd)) {
+        status.st_ino != by_path.st_ino || !cbm_macos_extended_acl_fd_is_empty(directory_fd)) {
         return CBM_PRIVATE_FILE_LOCK_UNSAFE;
     }
     cbm_private_lock_directory_t *directory = calloc(1, sizeof(*directory));
@@ -392,13 +390,11 @@ static bool private_lock_is_tracked(const cbm_private_file_lock_t *lock) {
     return false;
 }
 
-static bool private_payload_fd_valid(const cbm_private_file_lock_t *lock,
-                                     struct stat *status_out) {
+static bool private_payload_fd_valid(const cbm_private_file_lock_t *lock, struct stat *status_out) {
     struct stat status;
-    bool valid = lock && lock->fd >= 0 && !lock->unlocked &&
-                 lock->owner_pid == getpid() && private_lock_is_tracked(lock) &&
-                 fstat(lock->fd, &status) == 0 && S_ISREG(status.st_mode) &&
-                 status.st_uid == geteuid() && status.st_nlink == 1 &&
+    bool valid = lock && lock->fd >= 0 && !lock->unlocked && lock->owner_pid == getpid() &&
+                 private_lock_is_tracked(lock) && fstat(lock->fd, &status) == 0 &&
+                 S_ISREG(status.st_mode) && status.st_uid == geteuid() && status.st_nlink == 1 &&
                  (status.st_mode & 07777) == 0600 && status.st_size >= 0 &&
                  cbm_macos_extended_acl_fd_is_empty(lock->fd);
     if (valid && status_out) {
@@ -407,9 +403,9 @@ static bool private_payload_fd_valid(const cbm_private_file_lock_t *lock,
     return valid;
 }
 
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
-    cbm_private_file_lock_t *lock, void *buffer, size_t capacity,
-    size_t *length_out) {
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(cbm_private_file_lock_t *lock,
+                                                                  void *buffer, size_t capacity,
+                                                                  size_t *length_out) {
     if (length_out) {
         *length_out = 0;
     }
@@ -421,14 +417,13 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
     }
     struct stat status;
     bool metadata_safe = private_payload_fd_valid(lock, &status);
-    bool valid = metadata_safe &&
-                 (uintmax_t)status.st_size <= PRIVATE_FILE_LOCK_PAYLOAD_CAP &&
+    bool valid = metadata_safe && (uintmax_t)status.st_size <= PRIVATE_FILE_LOCK_PAYLOAD_CAP &&
                  (uintmax_t)status.st_size <= capacity;
     size_t length = valid ? (size_t)status.st_size : 0;
     size_t offset = 0;
     while (valid && offset < length) {
-        ssize_t count = pread(lock->fd, (unsigned char *)buffer + offset,
-                              length - offset, (off_t)offset);
+        ssize_t count =
+            pread(lock->fd, (unsigned char *)buffer + offset, length - offset, (off_t)offset);
         if (count > 0) {
             offset += (size_t)count;
         } else if (count < 0 && errno == EINTR) {
@@ -448,10 +443,10 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
     return CBM_PRIVATE_FILE_LOCK_OK;
 }
 
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(
-    cbm_private_file_lock_t *lock, const void *buffer, size_t length) {
-    if (!lock || !buffer || length == 0 ||
-        length > PRIVATE_FILE_LOCK_PAYLOAD_CAP ||
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(cbm_private_file_lock_t *lock,
+                                                                   const void *buffer,
+                                                                   size_t length) {
+    if (!lock || !buffer || length == 0 || length > PRIVATE_FILE_LOCK_PAYLOAD_CAP ||
         lock->mode != CBM_PRIVATE_FILE_LOCK_EX) {
         return CBM_PRIVATE_FILE_LOCK_UNSAFE;
     }
@@ -462,9 +457,8 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(
     bool valid = metadata_safe && ftruncate(lock->fd, 0) == 0;
     size_t offset = 0;
     while (valid && offset < length) {
-        ssize_t count = pwrite(lock->fd,
-                               (const unsigned char *)buffer + offset,
-                               length - offset, (off_t)offset);
+        ssize_t count = pwrite(lock->fd, (const unsigned char *)buffer + offset, length - offset,
+                               (off_t)offset);
         if (count > 0) {
             offset += (size_t)count;
         } else if (count < 0 && errno == EINTR) {
@@ -1376,13 +1370,12 @@ static bool private_win_payload_handle_valid(const cbm_private_file_lock_t *lock
            GetFileInformationByHandle(lock->handle, &information) != 0 &&
            (information.dwFileAttributes &
             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
-           information.nNumberOfLinks == 1 &&
-           private_win_handle_is_noninheritable(lock->handle);
+           information.nNumberOfLinks == 1 && private_win_handle_is_noninheritable(lock->handle);
 }
 
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
-    cbm_private_file_lock_t *lock, void *buffer, size_t capacity,
-    size_t *length_out) {
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(cbm_private_file_lock_t *lock,
+                                                                  void *buffer, size_t capacity,
+                                                                  size_t *length_out) {
     if (length_out) {
         *length_out = 0;
     }
@@ -1405,8 +1398,9 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
     while (valid && offset < length) {
         DWORD chunk = (DWORD)(length - offset);
         DWORD count = 0;
-        valid = ReadFile(lock->handle, (unsigned char *)buffer + offset, chunk,
-                         &count, NULL) != 0 && count > 0;
+        valid =
+            ReadFile(lock->handle, (unsigned char *)buffer + offset, chunk, &count, NULL) != 0 &&
+            count > 0;
         offset += valid ? (size_t)count : 0;
     }
     cbm_private_file_lock_fork_guard_leave();
@@ -1417,10 +1411,10 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
     return CBM_PRIVATE_FILE_LOCK_OK;
 }
 
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(
-    cbm_private_file_lock_t *lock, const void *buffer, size_t length) {
-    if (!lock || !buffer || length == 0 ||
-        length > PRIVATE_FILE_LOCK_PAYLOAD_CAP ||
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(cbm_private_file_lock_t *lock,
+                                                                   const void *buffer,
+                                                                   size_t length) {
+    if (!lock || !buffer || length == 0 || length > PRIVATE_FILE_LOCK_PAYLOAD_CAP ||
         lock->mode != CBM_PRIVATE_FILE_LOCK_EX) {
         return CBM_PRIVATE_FILE_LOCK_UNSAFE;
     }
@@ -1436,9 +1430,9 @@ cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(
     while (valid && offset < length) {
         DWORD chunk = (DWORD)(length - offset);
         DWORD count = 0;
-        valid = WriteFile(lock->handle,
-                          (const unsigned char *)buffer + offset, chunk, &count,
-                          NULL) != 0 && count > 0;
+        valid = WriteFile(lock->handle, (const unsigned char *)buffer + offset, chunk, &count,
+                          NULL) != 0 &&
+                count > 0;
         offset += valid ? (size_t)count : 0;
     }
     valid = valid && FlushFileBuffers(lock->handle) != 0;
@@ -1596,8 +1590,7 @@ void cbm_private_fork_condition_free(cbm_private_fork_condition_t *condition) {
     free(condition);
 }
 
-void cbm_private_fork_condition_broadcast_while_guarded(
-    cbm_private_fork_condition_t *condition) {
+void cbm_private_fork_condition_broadcast_while_guarded(cbm_private_fork_condition_t *condition) {
     if (condition) {
         WakeAllConditionVariable(&condition->value);
     }

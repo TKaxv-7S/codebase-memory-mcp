@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct cbm_mcp_server cbm_mcp_server_t;
 
@@ -42,6 +43,11 @@ int cbm_cli_print_tool_help(const char *tool_name);
  * object carries the exact boolean field `isError: true`; malformed JSON,
  * strings, and nested lookalikes are not tool errors. */
 bool cbm_cli_mcp_result_is_error(const char *result);
+
+/* Maintenance cancellation is authoritative even if a tool races to produce
+ * a nominal success result. Preserve an existing failure code; otherwise turn
+ * accepted cancellation into EXIT_FAILURE. */
+int cbm_cli_exit_status_after_maintenance(int exit_status, bool maintenance_cancelled);
 
 /* ── Self-update: version comparison ──────────────────────────── */
 
@@ -332,6 +338,19 @@ unsigned char *cbm_extract_binary_from_targz(const unsigned char *data, int data
  * Returns NULL on error. Caller must free. */
 unsigned char *cbm_extract_binary_from_zip(const unsigned char *data, int data_len, int *out_len);
 
+/* Strict two-file Windows release bundle extraction. The archive must contain
+ * exactly one root launcher and one root payload; ambiguous aliases,
+ * traversal, duplicates, and malformed central/local metadata fail closed. */
+typedef struct {
+    unsigned char *launcher;
+    int launcher_len;
+    unsigned char *payload;
+    int payload_len;
+} cbm_windows_release_pair_t;
+bool cbm_extract_windows_release_pair_from_zip(const unsigned char *data, int data_len,
+                                               cbm_windows_release_pair_t *pair_out);
+void cbm_windows_release_pair_free(cbm_windows_release_pair_t *pair);
+
 /* ── Index management ─────────────────────────────────────────── */
 
 /* List .db files in the cache directory (~/.cache/codebase-memory-mcp/).
@@ -385,10 +404,8 @@ typedef int (*cbm_cli_activation_mutation_fn)(void *context);
  * lease. Tests use it to prove that mutation never runs before the cohort has
  * drained. Return 1 with a non-NULL lease on success, 0 when participants did
  * not drain before the deadline, or -1 on an unsafe/IO failure. */
-typedef int (*cbm_cli_activation_reserve_fn)(
-    void *context, cbm_cli_activation_lock_t *lease_out);
-typedef void (*cbm_cli_activation_release_fn)(
-    void *context, cbm_cli_activation_lock_t lease);
+typedef int (*cbm_cli_activation_reserve_fn)(void *context, cbm_cli_activation_lock_t *lease_out);
+typedef void (*cbm_cli_activation_release_fn)(void *context, cbm_cli_activation_lock_t lease);
 
 /* Injectable high-level boundary for deterministic drain/mutation ordering
  * tests. Production never acquires startup while asking participants to
@@ -418,8 +435,15 @@ void cbm_cli_set_activation_ops_for_test(const cbm_cli_activation_ops_t *ops);
 /* Internal integration-test seam: isolate the stable endpoint beneath a
  * private runtime parent. NULL restores the platform default. This is not a
  * command-line or environment override. */
-void cbm_cli_set_activation_runtime_parent_for_test(
-    const char *runtime_parent);
+void cbm_cli_set_activation_runtime_parent_for_test(const char *runtime_parent);
+
+/* Consume and authenticate any inherited permanent-launcher context before
+ * process-role classification. An absent context is the normal portable
+ * payload case; an advertised but invalid context fails closed. */
+int cbm_cli_windows_launcher_startup_authenticate(int argc, char *const argv[]);
+/* Internal release-pair probe. Returns -1 when argv does not select the role,
+ * otherwise a process exit code. It runs before cache/daemon initialization. */
+int cbm_cli_windows_payload_descriptor_role(int argc, char *const argv[]);
 
 /* ── Subcommands (wired from main.c) ─────────────────────────── */
 
@@ -467,12 +491,9 @@ char *cbm_hook_augment_process(cbm_mcp_server_t *srv, const char *input_json);
 /* Dialect-aware daemon entry. forced_event and dialect_name are borrowed and
  * may be NULL for the ordinary event dialect. Unsupported combinations fail
  * open with NULL, matching the direct hook command. */
-bool cbm_hook_augment_invocation_supported(const char *forced_event,
-                                            const char *dialect_name);
-char *cbm_hook_augment_process_for(cbm_mcp_server_t *srv,
-                                   const char *input_json,
-                                   const char *forced_event,
-                                   const char *dialect_name);
+bool cbm_hook_augment_invocation_supported(const char *forced_event, const char *dialect_name);
+char *cbm_hook_augment_process_for(cbm_mcp_server_t *srv, const char *input_json,
+                                   const char *forced_event, const char *dialect_name);
 
 /* True for an absolute path the augmenter can walk up: POSIX "/..." or a
  * Windows drive root — "X:/..." or a bare "X:" (callers normalize '\\' to '/'

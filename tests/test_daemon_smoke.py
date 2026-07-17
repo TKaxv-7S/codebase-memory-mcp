@@ -742,11 +742,26 @@ def main():
         tmpdir = Path(raw_tmpdir)
         home = tmpdir / "home"
         cache = tmpdir / "cache"
+        cache_alias = tmpdir / "cache-alias"
+        mismatched_cache = tmpdir / "mismatched-cache"
+        retargeted_cache = tmpdir / "retargeted-cache"
         repo = tmpdir / "repo"
         success_repo = tmpdir / "success-repo"
         target_dir = home / ".local/bin"
-        for directory in (home, cache, repo, success_repo, target_dir):
+        for directory in (
+            home,
+            cache,
+            mismatched_cache,
+            retargeted_cache,
+            repo,
+            success_repo,
+            target_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
+        # Exercise startup hardening of an existing user-selected root, not
+        # merely secure creation of a previously absent directory.
+        cache.chmod(0o755)
+        cache_alias.symlink_to(cache, target_is_directory=True)
         (repo / "hang_me.py").write_text("def smoke():\n    return 1\n", encoding="utf-8")
         (success_repo / "tiny.py").write_text(
             "def daemon_index_smoke():\n    return 1\n", encoding="utf-8"
@@ -764,7 +779,7 @@ def main():
         env.update(
             {
                 "HOME": str(home),
-                "CBM_CACHE_DIR": str(cache),
+                "CBM_CACHE_DIR": str(cache_alias),
                 "CBM_LOG_LEVEL": "info",
                 "CBM_LOG_FORMAT": "json",
                 "CBM_TEST_HANG_ON": "hang_me",
@@ -898,9 +913,12 @@ def main():
                 "daemon endpoint and lifetime reservation",
             )
             runtime_status = os.stat(runtime_dir)
+            cache_status = os.stat(cache)
             socket_status = os.lstat(socket_path)
             check(runtime_status.st_uid == os.geteuid(), "runtime directory has wrong owner")
             check(stat.S_IMODE(runtime_status.st_mode) == 0o700, "runtime directory is not 0700")
+            check(cache_status.st_uid == os.geteuid(), "cache root has wrong owner")
+            check(stat.S_IMODE(cache_status.st_mode) == 0o700, "cache root is not 0700")
             check(stat.S_ISSOCK(socket_status.st_mode), "daemon endpoint is not a Unix socket")
             check(socket_status.st_uid == os.geteuid(), "daemon endpoint has wrong owner")
             wait_until(
@@ -912,6 +930,86 @@ def main():
                 len(json_events(daemon_log, "daemon.start")) == 1,
                 "two simultaneous clients spawned more than one daemon",
             )
+
+            # One account daemon owns one canonical cache root. An exact-build
+            # process configured with another root must fail before it joins
+            # the daemon generation, while the active sessions remain healthy.
+            mismatched_env = env.copy()
+            mismatched_env["CBM_CACHE_DIR"] = str(mismatched_cache)
+            mismatched_log = mismatched_cache / "logs/daemon-conflicts.ndjson"
+            active_cache_fingerprint = hashlib.sha256(
+                str(cache.resolve()).encode("utf-8")
+            ).hexdigest()
+            requested_cache_fingerprint = hashlib.sha256(
+                str(mismatched_cache.resolve()).encode("utf-8")
+            ).hexdigest()
+            mismatched_result = subprocess.run(
+                [str(binary)],
+                input=json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 203,
+                        "method": "initialize",
+                        "params": initialize_params,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=mismatched_env,
+                timeout=15,
+                check=False,
+            )
+            check(
+                mismatched_result.returncode != 0,
+                "mismatched CBM_CACHE_DIR unexpectedly joined the account daemon",
+            )
+            check(
+                "active account daemon uses a different cache directory"
+                in mismatched_result.stderr
+                and "CBM_CACHE_DIR" in mismatched_result.stderr,
+                "cache-root conflict did not emit visible remediation guidance: "
+                + repr(mismatched_result.stderr),
+            )
+            wait_until(
+                lambda: any(
+                    item.get("reason") == "cache_root"
+                    and item.get("active_cache") == active_cache_fingerprint
+                    and item.get("requested_cache")
+                    == requested_cache_fingerprint
+                    for item in json_events(
+                        mismatched_log, "daemon.version_conflict"
+                    )
+                ),
+                10,
+                "cache-root durable conflict log",
+            )
+            mismatched_log_text = mismatched_log.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            check(
+                str(cache) not in mismatched_log_text
+                and str(mismatched_cache) not in mismatched_log_text,
+                "cache-root conflict log exposed a raw cache path",
+            )
+            c1.send({"jsonrpc": "2.0", "id": 105, "method": "ping", "params": {}})
+            assert_rpc_success(
+                c1.wait_response(105), "active session after cache-root rejection"
+            )
+            check(
+                c2.process.poll() is None
+                and len(json_events(daemon_log, "daemon.start")) == 1,
+                "cache-root conflict disturbed the active daemon generation",
+            )
+
+            # A process must keep using the canonical cache root it admitted,
+            # even if the original CBM_CACHE_DIR symlink is retargeted later.
+            # Otherwise a daemon worker can silently move storage while the
+            # cohort still advertises the old root fingerprint.
+            cache_alias.unlink()
+            cache_alias.symlink_to(retargeted_cache, target_is_directory=True)
 
             # A real daemon-backed index must cross the physical-worker
             # boundary and finish. This is the regression for the former
@@ -936,6 +1034,16 @@ def main():
                 c2.wait_response(204, timeout=OPERATION_TIMEOUT),
                 "daemon-backed tiny index",
             )
+            check(
+                (cache / "smoke-daemon-success.db").is_file(),
+                "daemon worker did not write through the admitted canonical cache root",
+            )
+            check(
+                not any(retargeted_cache.iterdir()),
+                "retargeting the original cache symlink moved daemon storage",
+            )
+            cache_alias.unlink()
+            cache_alias.symlink_to(cache, target_is_directory=True)
             wait_until(
                 descendant_pid_path.exists,
                 OPERATION_TIMEOUT,
@@ -1269,7 +1377,10 @@ def main():
                 "session-close worker exited before EOF",
             )
             c1.close_input()
-            check(c1.wait(timeout=15) == 0, "EOF-cancelled frontend exited nonzero")
+            check(
+                c1.wait(timeout=15) == 0,
+                "EOF-cancelled frontend exited nonzero",
+            )
             wait_until(
                 lambda: process_gone_or_zombie(close_descendant_pid),
                 20,

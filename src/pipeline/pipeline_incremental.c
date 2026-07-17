@@ -662,8 +662,8 @@ static int dump_and_persist(cbm_gbuf_t *gbuf, const char *db_path, const char *p
         cbm_log_error("incremental.err", "msg", "open_staging_after_dump", "path", db_path);
         return CBM_STORE_ERR;
     }
-    int rc = persist_hashes(hash_store, project, files, file_count, mode_skipped,
-                            mode_skipped_count);
+    int rc =
+        persist_hashes(hash_store, project, files, file_count, mode_skipped, mode_skipped_count);
 
     /* Coverage rows (#963): re-write the merged set into the rebuilt DB
      * (AFTER hashes, so the deleted-file prune sees the live file set). */
@@ -673,8 +673,7 @@ static int dump_and_persist(cbm_gbuf_t *gbuf, const char *db_path, const char *p
     cbm_coverage_meta_t meta = meta_template ? *meta_template : (cbm_coverage_meta_t){0};
     meta.generation = have_project_info ? project_info.indexed_at : NULL;
     meta.hash_records_complete = rc == CBM_STORE_OK;
-    if (cbm_store_coverage_replace_ex(hash_store, project, cov, cov_count, &meta) !=
-        CBM_STORE_OK) {
+    if (cbm_store_coverage_replace_ex(hash_store, project, cov, cov_count, &meta) != CBM_STORE_OK) {
         cbm_log_error("incremental.err", "msg", "persist_coverage", "project", project);
         rc = CBM_STORE_ERR;
     }

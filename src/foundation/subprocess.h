@@ -49,7 +49,8 @@ typedef struct {
 typedef void (*cbm_proc_log_cb)(const char *line, void *ud);
 
 typedef struct {
-    const char *bin;             /* executable path; also argv[0] when argv is NULL */
+    const char *bin;             /* executable path or literal PATH name;
+                                  * also argv[0] when argv is NULL */
     const char *const *argv;     /* NULL-terminated argv; NULL => { bin, NULL } */
     const char *log_file;        /* child stdout+stderr are redirected here and tailed;
                                   * NULL => discard child output, no tailing */

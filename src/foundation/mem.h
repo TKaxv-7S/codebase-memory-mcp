@@ -48,8 +48,7 @@ cbm_mem_budget_t cbm_mem_resolve_budget(size_t total_ram, double ram_fraction,
 
 /* Pure capped variant used by supervised workers and deterministic tests. */
 cbm_mem_budget_t cbm_mem_resolve_budget_capped(size_t total_ram, double ram_fraction,
-                                               const char *budget_mb,
-                                               size_t hard_cap_bytes);
+                                               const char *budget_mb, size_t hard_cap_bytes);
 
 /* Current RSS in bytes via mi_process_info().
  * Falls back to OS-specific queries when MI_OVERRIDE=0 (ASan builds). */

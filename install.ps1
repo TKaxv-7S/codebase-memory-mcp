@@ -14,6 +14,14 @@ Add-Type -AssemblyName System.Net.Http
 $Repo = "DeusData/codebase-memory-mcp"
 $InstallDir = "$env:LOCALAPPDATA\Programs\codebase-memory-mcp"
 $BinName = "codebase-memory-mcp.exe"
+$PayloadName = "codebase-memory-mcp.payload.exe"
+$WindowsArchiveNames = @(
+    $BinName,
+    $PayloadName,
+    "LICENSE",
+    "install.ps1",
+    "THIRD_PARTY_NOTICES.md"
+)
 $BaseUrl = if ($env:CBM_DOWNLOAD_URL) { $env:CBM_DOWNLOAD_URL } else { "https://github.com/$Repo/releases/latest/download" }
 
 try { $BaseUri = [Uri]$BaseUrl } catch { $BaseUri = $null }
@@ -179,27 +187,82 @@ try {
     exit 1
 }
 
-# Extract
+# Validate the zip namespace before extraction. Windows paths are
+# case-insensitive, so two entries that differ only in case are ambiguous and
+# must never be allowed to overwrite each other. The official five entries are
+# required at the archive root with their exact release names.
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead("$TmpDir\$Archive")
+    try {
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $archiveCounts = @{}
+        foreach ($archiveName in $WindowsArchiveNames) { $archiveCounts[$archiveName] = 0 }
+        foreach ($entry in $zip.Entries) {
+            $entryName = $entry.FullName.Replace('\', '/')
+            $isDirectory = $entryName.EndsWith('/')
+            $pathForSegments = if ($isDirectory) { $entryName.TrimEnd('/') } else { $entryName }
+            $segments = @($pathForSegments.Split('/'))
+            if ([string]::IsNullOrEmpty($pathForSegments) -or
+                $entryName.StartsWith('/') -or
+                $entryName.Contains(':') -or
+                $segments -contains '' -or
+                $segments -contains '.' -or
+                $segments -contains '..' -or
+                @($segments | Where-Object { $_.EndsWith('.') -or $_.EndsWith(' ') }).Count -gt 0) {
+                throw "unsafe zip entry path: $($entry.FullName)"
+            }
+            if (-not $seen.Add($pathForSegments)) {
+                throw "duplicate or case-conflicting zip entry: $($entry.FullName)"
+            }
+            if (-not ($WindowsArchiveNames -ccontains $entryName) -or $isDirectory) {
+                throw "archive contains an unexpected root entry: $($entry.FullName)"
+            }
+            $archiveCounts[$entryName] = $archiveCounts[$entryName] + 1
+        }
+        foreach ($archiveName in $WindowsArchiveNames) {
+            if ($archiveCounts[$archiveName] -ne 1) {
+                throw "archive must contain exactly one $archiveName"
+            }
+        }
+        if ($seen.Count -ne $WindowsArchiveNames.Count) {
+            throw "archive does not match the exact Windows release allowlist"
+        }
+    } finally {
+        $zip.Dispose()
+    }
+} catch {
+    Write-Host "error: unsafe or incomplete release archive: $_" -ForegroundColor Red
+    Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
+    exit 1
+}
+
+# Extract the complete, validated bundle. The portable launcher owns the
+# managed install transaction and contains its adjacent payload.
 Write-Host "Extracting..."
 Expand-Archive -Path "$TmpDir\$Archive" -DestinationPath $TmpDir -Force
 
-$DlBin = Join-Path $TmpDir $BinName
-if (-not (Test-Path $DlBin)) {
-    # UI variant may have different name in zip
-    $UiBin = Join-Path $TmpDir "codebase-memory-mcp-ui.exe"
-    if (Test-Path $UiBin) {
-        Rename-Item $UiBin $BinName
-        $DlBin = Join-Path $TmpDir $BinName
-    } else {
-        Write-Host "error: binary not found after extraction" -ForegroundColor Red
-        Remove-Item -Recurse -Force $TmpDir
-        exit 1
-    }
+$DownloadedLauncher = Join-Path $TmpDir $BinName
+$DownloadedPayload = Join-Path $TmpDir $PayloadName
+if (-not (Test-Path -LiteralPath $DownloadedLauncher -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $DownloadedPayload -PathType Leaf)) {
+    Write-Host "error: launcher or payload not found after extraction" -ForegroundColor Red
+    Remove-Item -Recurse -Force $TmpDir
+    exit 1
+}
+$launcherItem = Get-Item -LiteralPath $DownloadedLauncher
+$payloadItem = Get-Item -LiteralPath $DownloadedPayload
+if (($launcherItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+    ($payloadItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+    Write-Host "error: refusing reparse-point executable in release archive" -ForegroundColor Red
+    Remove-Item -Recurse -Force $TmpDir
+    exit 1
 }
 
-# Verify the candidate before it asks all coordinated CBM processes to stop.
+# Verify the complete launcher/payload path before it asks all coordinated CBM
+# processes to stop.
 try {
-    $candidateVersion = & $DlBin --version 2>&1
+    $candidateVersion = & $DownloadedLauncher --version 2>&1
     if ($LASTEXITCODE -ne 0) { throw "candidate exited with $LASTEXITCODE" }
     Write-Host "Verified candidate: $candidateVersion"
 } catch {
@@ -211,7 +274,9 @@ try {
 $Dest = Join-Path $InstallDir $BinName
 $InstallArgs = @("install", "-y", "--force", "--dir=$InstallDir")
 if ($SkipConfig) { $InstallArgs += "--skip-config" }
-& $DlBin @InstallArgs
+# PowerShell's call operator waits for the launcher, which in turn contains the
+# install payload in its native job and relays the exact exit status.
+& $DownloadedLauncher @InstallArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "error: coordinated activation failed (exit code $LASTEXITCODE)" -ForegroundColor Red
     Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue

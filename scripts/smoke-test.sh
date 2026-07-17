@@ -18,6 +18,27 @@ if [ -n "$SMOKE_MODE" ] && [ "$SMOKE_MODE" != "--agent-config-only" ]; then
   exit 2
 fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+# Windows release archives contain a small permanent launcher plus a portable
+# payload. Whenever a smoke fixture copies the launcher, keep the payload next
+# to it so the copied fixture remains a complete portable bundle.
+WINDOWS_PAYLOAD=""
+if [[ "$BINARY" == *.exe ]]; then
+  WINDOWS_PAYLOAD="$(cd "$(dirname "$BINARY")" && pwd)/codebase-memory-mcp.payload.exe"
+  if [ ! -f "$WINDOWS_PAYLOAD" ]; then
+    echo "FAIL: Windows launcher has no adjacent codebase-memory-mcp.payload.exe"
+    exit 1
+  fi
+fi
+
+copy_smoke_binary() {
+  local destination="$1"
+  cp "$BINARY" "$destination"
+  if [ -n "$WINDOWS_PAYLOAD" ]; then
+    cp "$WINDOWS_PAYLOAD" "$(dirname "$destination")/codebase-memory-mcp.payload.exe"
+  fi
+}
+
 TMPDIR=$(mktemp -d)
 DRYRUN_HOME=""
 # On MSYS2/Windows, convert POSIX path to native Windows path for the binary
@@ -660,29 +681,28 @@ rm -f "$MCP_INPUT" "$MCP_OUTPUT"
 # 5e: MCP tool call via JSON-RPC (index + search round-trip)
 echo ""
 echo "--- Phase 5e: MCP tool call round-trip ---"
-MCP_TOOL_INPUT=$(mktemp)
 MCP_TOOL_OUTPUT=$(mktemp)
 
-cat > "$MCP_TOOL_INPUT" << TOOLEOF
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1.0"}}}
-{"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"index_repository","arguments":{"repo_path":"$TMPDIR","mode":"fast"}}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_graph","arguments":{"name_pattern":"compute"}}}
-TOOLEOF
-
-mcp_run "$MCP_TOOL_INPUT" "$MCP_TOOL_OUTPUT" 30
+if ! python3 "$REPO_ROOT/scripts/test_mcp_interactive.py" \
+    "$BINARY" --scenario roundtrip --repo-path "$TMPDIR" \
+    > "$MCP_TOOL_OUTPUT"; then
+  echo "FAIL: interactive MCP index + search session failed"
+  cat "$MCP_TOOL_OUTPUT"
+  rm -f "$MCP_TOOL_OUTPUT"
+  exit 1
+fi
 
 if ! grep -q '"id":2' "$MCP_TOOL_OUTPUT"; then
   echo "FAIL: no index_repository response (id:2)"
   cat "$MCP_TOOL_OUTPUT"
-  rm -f "$MCP_TOOL_INPUT" "$MCP_TOOL_OUTPUT"
+  rm -f "$MCP_TOOL_OUTPUT"
   exit 1
 fi
 
 if ! grep -q '"id":3' "$MCP_TOOL_OUTPUT"; then
   echo "FAIL: no search_graph response (id:3)"
   cat "$MCP_TOOL_OUTPUT"
-  rm -f "$MCP_TOOL_INPUT" "$MCP_TOOL_OUTPUT"
+  rm -f "$MCP_TOOL_OUTPUT"
   exit 1
 fi
 echo "OK: MCP tool call round-trip (index + search) succeeded"
@@ -711,7 +731,7 @@ if ! grep -q '"id":1' "$MCP_CL_OUTPUT" || ! grep -q '"id":2' "$MCP_CL_OUTPUT"; t
 fi
 echo "OK: Content-Length framing works (OpenCode compatible)"
 
-rm -f "$MCP_CL_INPUT" "$MCP_CL_OUTPUT" "$MCP_TOOL_INPUT" "$MCP_TOOL_OUTPUT"
+rm -f "$MCP_CL_INPUT" "$MCP_CL_OUTPUT" "$MCP_TOOL_OUTPUT"
 
 echo ""
 echo "=== Phase 6: CLI subcommands ==="
@@ -750,25 +770,49 @@ echo "OK: install --dry-run completed"
 
 # 6b: uninstall --dry-run -y
 echo "--- Phase 6b: uninstall --dry-run ---"
-UNINSTALL_OUT=$(run_dryrun_env "$BINARY" uninstall --dry-run -y 2>&1)
-if ! echo "$UNINSTALL_OUT" | grep -qi 'uninstall\|remov'; then
-  echo "FAIL: uninstall --dry-run produced unexpected output"
-  echo "$UNINSTALL_OUT"
-  exit 1
+if [[ "$BINARY" == *.exe ]]; then
+  if UNINSTALL_OUT=$(run_dryrun_env "$BINARY" uninstall --dry-run -y 2>&1); then
+    echo "FAIL: portable Windows bundle accepted uninstall"
+    exit 1
+  fi
+  if ! echo "$UNINSTALL_OUT" | grep -qi 'managed\|install\|package'; then
+    echo "FAIL: portable Windows uninstall refusal had no install guidance"
+    echo "$UNINSTALL_OUT"
+    exit 1
+  fi
+else
+  UNINSTALL_OUT=$(run_dryrun_env "$BINARY" uninstall --dry-run -y 2>&1)
+  if ! echo "$UNINSTALL_OUT" | grep -qi 'uninstall\|remov'; then
+    echo "FAIL: uninstall --dry-run produced unexpected output"
+    echo "$UNINSTALL_OUT"
+    exit 1
+  fi
 fi
 echo "OK: uninstall --dry-run completed"
 
 # 6c: update --dry-run --standard -y
 echo "--- Phase 6c: update --dry-run ---"
-UPDATE_OUT=$(run_dryrun_env "$BINARY" update --dry-run --standard -y 2>&1)
-if ! echo "$UPDATE_OUT" | grep -qi 'dry-run'; then
-  echo "FAIL: update --dry-run did not indicate dry-run mode"
-  echo "$UPDATE_OUT"
-  exit 1
-fi
-if ! echo "$UPDATE_OUT" | grep -qi 'standard'; then
-  echo "FAIL: update --dry-run did not respect --standard flag"
-  exit 1
+if [[ "$BINARY" == *.exe ]]; then
+  if UPDATE_OUT=$(run_dryrun_env "$BINARY" update --dry-run --standard -y 2>&1); then
+    echo "FAIL: portable Windows bundle accepted update"
+    exit 1
+  fi
+  if ! echo "$UPDATE_OUT" | grep -qi 'managed\|install\|package'; then
+    echo "FAIL: portable Windows update refusal had no install guidance"
+    echo "$UPDATE_OUT"
+    exit 1
+  fi
+else
+  UPDATE_OUT=$(run_dryrun_env "$BINARY" update --dry-run --standard -y 2>&1)
+  if ! echo "$UPDATE_OUT" | grep -qi 'dry-run'; then
+    echo "FAIL: update --dry-run did not indicate dry-run mode"
+    echo "$UPDATE_OUT"
+    exit 1
+  fi
+  if ! echo "$UPDATE_OUT" | grep -qi 'standard'; then
+    echo "FAIL: update --dry-run did not respect --standard flag"
+    exit 1
+  fi
 fi
 # On Linux the binary must self-update from the static "-portable" asset: the
 # standard linux asset dynamically links glibc 2.38+ and breaks on older distros
@@ -803,7 +847,7 @@ INSTALL_DIR="$REPLACE_DIR/install"
 mkdir -p "$INSTALL_DIR"
 
 # 1. Copy binary to "install dir" as the "currently installed" version
-cp "$BINARY" "$INSTALL_DIR/codebase-memory-mcp"
+copy_smoke_binary "$INSTALL_DIR/codebase-memory-mcp"
 chmod 755 "$INSTALL_DIR/codebase-memory-mcp"
 
 # Verify installed binary works
@@ -815,7 +859,7 @@ if ! echo "$INSTALLED_VER" | grep -qE 'v?[0-9]+\.[0-9]+|dev'; then
 fi
 
 # 2. Copy binary as the "downloaded" new version
-cp "$BINARY" "$REPLACE_DIR/smoke-codebase-memory-mcp"
+copy_smoke_binary "$REPLACE_DIR/smoke-codebase-memory-mcp"
 
 # 3. Simulate cbm_replace_binary: unlink old, copy new
 rm -f "$INSTALL_DIR/codebase-memory-mcp"
@@ -852,17 +896,15 @@ echo "=== Phase 7: MCP advanced tool calls ==="
 
 # 7a: search_code via MCP (graph-augmented v2)
 echo "--- Phase 7a: search_code via MCP ---"
-MCP_SC_INPUT=$(mktemp)
 MCP_SC_OUTPUT=$(mktemp)
-cat > "$MCP_SC_INPUT" << SCEOF
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}
-{"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"index_repository","arguments":{"repo_path":"$TMPDIR","mode":"fast"}}}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_code","arguments":{"pattern":"compute","mode":"compact","limit":3}}}
-{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_code_snippet","arguments":{"qualified_name":"compute"}}}
-SCEOF
-
-mcp_run "$MCP_SC_INPUT" "$MCP_SC_OUTPUT" 30
+if ! python3 "$REPO_ROOT/scripts/test_mcp_interactive.py" \
+    "$BINARY" --scenario advanced --repo-path "$TMPDIR" \
+    > "$MCP_SC_OUTPUT"; then
+  echo "FAIL: interactive MCP advanced-tool session failed"
+  cat "$MCP_SC_OUTPUT"
+  rm -f "$MCP_SC_OUTPUT"
+  exit 1
+fi
 
 if ! grep -q '"id":3' "$MCP_SC_OUTPUT"; then
   echo "FAIL: search_code response (id:3) missing"
@@ -877,7 +919,7 @@ if ! grep -q '"id":4' "$MCP_SC_OUTPUT"; then
 fi
 echo "OK: get_code_snippet via MCP"
 
-rm -f "$MCP_SC_INPUT" "$MCP_SC_OUTPUT"
+rm -f "$MCP_SC_OUTPUT"
 
 fi
 
@@ -955,7 +997,7 @@ mkdir -p "$GITLAB_DIR" "$(dirname "$GITLAB_HOOKS")" "$DEVIN_DIR"
 mkdir -p "$FAKE_HOME/.local/bin"
 # Copy binary with correct name for platform
 if [[ "$BINARY" == *.exe ]]; then
-  cp "$BINARY" "$FAKE_HOME/.local/bin/codebase-memory-mcp.exe"
+  copy_smoke_binary "$FAKE_HOME/.local/bin/codebase-memory-mcp.exe"
   SELF_PATH="$FAKE_HOME/.local/bin/codebase-memory-mcp.exe"
 else
   cp "$BINARY" "$FAKE_HOME/.local/bin/codebase-memory-mcp"
@@ -2088,6 +2130,10 @@ echo ""
 echo "=== Phase 9: agent config uninstall E2E ==="
 
 # Run uninstall (same FAKE_HOME with all configs present)
+UNINSTALL_BINARY="$BINARY"
+if [[ "$BINARY" == *.exe ]]; then
+  UNINSTALL_BINARY="$SELF_PATH"
+fi
 HOME="$FAKE_HOME" \
   XDG_CONFIG_HOME="$FAKE_HOME/.config" \
   APPDATA="$FAKE_HOME/AppData/Roaming" \
@@ -2095,7 +2141,7 @@ HOME="$FAKE_HOME" \
   KIMI_CODE_HOME="$CUSTOM_KIMI_HOME" \
   CBM_ROO_CONFIG_PATH="$ROO_CFG" \
   PATH="$FAKE_HOME/.local/bin:$PATH" \
-  "$BINARY" uninstall -y -n 2>&1 || true
+  "$UNINSTALL_BINARY" uninstall -y -n 2>&1 || true
 
 # 9a-b: Claude Code MCP removed but existing keys preserved
 if cat "$FAKE_HOME/.claude.json" 2>/dev/null | python3 -c "
@@ -2456,9 +2502,13 @@ rm -rf "$EMPTY_HOME"
 # 9b-2: Install twice (idempotent)
 IDEM_HOME=$(mktemp -d)
 mkdir -p "$IDEM_HOME/.claude" "$IDEM_HOME/.local/bin"
-cp "$BINARY" "$IDEM_HOME/.local/bin/codebase-memory-mcp"
+copy_smoke_binary "$IDEM_HOME/.local/bin/codebase-memory-mcp"
 HOME="$IDEM_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
-HOME="$IDEM_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
+IDEM_INSTALLER="$BINARY"
+if [[ "$BINARY" == *.exe ]]; then
+  IDEM_INSTALLER="$IDEM_HOME/.local/bin/codebase-memory-mcp.exe"
+fi
+HOME="$IDEM_HOME" "$IDEM_INSTALLER" install -y 2>&1 > /dev/null || true
 # Count MCP entries — should be exactly 1
 COUNT=$(cat "$IDEM_HOME/.claude.json" 2>/dev/null | python3 -c "
 import json, sys
@@ -2482,7 +2532,7 @@ rm -rf "$CLEAN_HOME"
 # 9b-4: Install over corrupt JSON
 CORRUPT_HOME=$(mktemp -d)
 mkdir -p "$CORRUPT_HOME/.claude" "$CORRUPT_HOME/.local/bin"
-cp "$BINARY" "$CORRUPT_HOME/.local/bin/codebase-memory-mcp"
+copy_smoke_binary "$CORRUPT_HOME/.local/bin/codebase-memory-mcp"
 echo '{invalid json here' > "$CORRUPT_HOME/.claude.json"
 HOME="$CORRUPT_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
 # Should either fix it or handle gracefully — not crash
@@ -2492,9 +2542,13 @@ rm -rf "$CORRUPT_HOME"
 # 9b-8: Double uninstall
 DBL_HOME=$(mktemp -d)
 mkdir -p "$DBL_HOME/.claude" "$DBL_HOME/.local/bin"
-cp "$BINARY" "$DBL_HOME/.local/bin/codebase-memory-mcp"
+copy_smoke_binary "$DBL_HOME/.local/bin/codebase-memory-mcp"
 HOME="$DBL_HOME" "$BINARY" install -y 2>&1 > /dev/null || true
-HOME="$DBL_HOME" "$BINARY" uninstall -y -n 2>&1 > /dev/null || true
+DBL_UNINSTALLER="$BINARY"
+if [[ "$BINARY" == *.exe ]]; then
+  DBL_UNINSTALLER="$DBL_HOME/.local/bin/codebase-memory-mcp.exe"
+fi
+HOME="$DBL_HOME" "$DBL_UNINSTALLER" uninstall -y -n 2>&1 > /dev/null || true
 HOME="$DBL_HOME" "$BINARY" uninstall -y -n 2>&1 > /dev/null || true
 echo "OK 9b-8: double uninstall doesn't crash"
 rm -rf "$DBL_HOME"
@@ -2523,7 +2577,7 @@ echo "=== Phase 10: binary security E2E ==="
 
 SECURITY_DIR=$(mktemp -d)
 SECURITY_BIN="$SECURITY_DIR/codebase-memory-mcp"
-cp "$BINARY" "$SECURITY_BIN"
+copy_smoke_binary "$SECURITY_BIN"
 chmod 755 "$SECURITY_BIN"
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -2642,17 +2696,47 @@ echo ""
 echo "=== Phase 14: update + uninstall E2E ==="
 
 if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
-  # ── 14a-f: Real update command against local HTTP server ──
+  # ── 14a-f: Real update command against the local release fixture ──
+  # Curl/installer phases below keep using the loopback HTTP artifact server.
+  # Native update intentionally accepts only HTTPS, plus an explicit file://
+  # CBM_DOWNLOAD_URL test override, so point it directly at the same fixture.
+  UPDATE_DOWNLOAD_URL="$SMOKE_DOWNLOAD_URL"
+  if [ -n "${SMOKE_UPDATE_FIXTURE_DIR:-}" ]; then
+    UPDATE_FIXTURE_DIR="$SMOKE_UPDATE_FIXTURE_DIR"
+    if command -v cygpath &>/dev/null; then
+      UPDATE_FIXTURE_DIR=$(cygpath -m "$UPDATE_FIXTURE_DIR")
+      UPDATE_DOWNLOAD_URL="file:///$UPDATE_FIXTURE_DIR"
+    elif [[ "$UPDATE_FIXTURE_DIR" == /* ]]; then
+      UPDATE_DOWNLOAD_URL="file://$UPDATE_FIXTURE_DIR"
+    else
+      echo "FAIL 14a: SMOKE_UPDATE_FIXTURE_DIR must be absolute"
+      exit 1
+    fi
+  fi
   UPDATE_HOME=$(mktemp -d)
   mkdir -p "$UPDATE_HOME/.claude" "$UPDATE_HOME/.local/bin"
   if [[ "$BINARY" == *.exe ]]; then
-    cp "$BINARY" "$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe"
+    copy_smoke_binary "$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe"
     chmod 755 "$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe"
   else
     cp "$BINARY" "$UPDATE_HOME/.local/bin/codebase-memory-mcp"
     chmod 755 "$UPDATE_HOME/.local/bin/codebase-memory-mcp"
     if [ "$(uname -s)" = "Darwin" ]; then
       codesign --sign - --force "$UPDATE_HOME/.local/bin/codebase-memory-mcp" 2>/dev/null || true
+    fi
+  fi
+
+  # A portable Windows payload may install a managed launcher, but it must not
+  # perform update/uninstall directly. Establish the managed layout first and
+  # exercise those mutations through its canonical launcher.
+  UPDATE_DRIVER="$BINARY"
+  if [[ "$BINARY" == *.exe ]]; then
+    HOME="$UPDATE_HOME" "$WINDOWS_PAYLOAD" install -y --force --skip-config \
+      "--dir=$UPDATE_HOME/.local/bin"
+    UPDATE_DRIVER="$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe"
+    if [ ! -f "$UPDATE_DRIVER" ]; then
+      echo "FAIL 14a: managed Windows launcher missing after install"
+      exit 1
     fi
   fi
 
@@ -2664,15 +2748,19 @@ if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
   if curl -sf "$SMOKE_DOWNLOAD_URL/" 2>/dev/null | grep -q "ui-"; then
     UPDATE_VARIANT="--ui"
   fi
-  HOME="$UPDATE_HOME" CBM_DOWNLOAD_URL="$SMOKE_DOWNLOAD_URL" \
-    "$BINARY" update $UPDATE_VARIANT -y 2>&1 || true
+  HOME="$UPDATE_HOME" CBM_DOWNLOAD_URL="$UPDATE_DOWNLOAD_URL" \
+    "$UPDATE_DRIVER" update $UPDATE_VARIANT -y 2>&1
 
   # 14b: Verify new binary exists and runs
-  if [ ! -f "$UPDATE_HOME/.local/bin/codebase-memory-mcp" ]; then
+  if [[ "$BINARY" == *.exe ]]; then
+    UPD_BIN="$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe"
+  else
+    UPD_BIN="$UPDATE_HOME/.local/bin/codebase-memory-mcp"
+  fi
+  if [ ! -f "$UPD_BIN" ]; then
     echo "FAIL 14b: binary missing after update"
     exit 1
   fi
-  UPD_BIN="$UPDATE_HOME/.local/bin/codebase-memory-mcp"
   if [ "$(uname -s)" = "Darwin" ]; then
     codesign --sign - --force "$UPD_BIN" 2>/dev/null || true
   fi
@@ -2696,13 +2784,13 @@ if [ -n "${SMOKE_DOWNLOAD_URL:-}" ]; then
 
   # ── 14d-f: Real uninstall with binary removal ──
   # First verify binary + configs exist
-  if [ ! -f "$UPDATE_HOME/.local/bin/codebase-memory-mcp" ]; then
+  if [ ! -f "$UPD_BIN" ]; then
     echo "FAIL 14d: binary should exist before uninstall"
     exit 1
   fi
 
   # Run actual uninstall
-  HOME="$UPDATE_HOME" "$BINARY" uninstall -y 2>&1 || true
+  HOME="$UPDATE_HOME" "$UPD_BIN" uninstall -y 2>&1
 
   # 14e: Verify binary removed
   if [ -f "$UPDATE_HOME/.local/bin/codebase-memory-mcp" ] || [ -f "$UPDATE_HOME/.local/bin/codebase-memory-mcp.exe" ]; then
@@ -2730,9 +2818,9 @@ else
   # Local mode: basic binary replacement test (no download)
   UPDATE_DIR=$(mktemp -d)
   mkdir -p "$UPDATE_DIR/install"
-  cp "$BINARY" "$UPDATE_DIR/install/codebase-memory-mcp"
+  copy_smoke_binary "$UPDATE_DIR/install/codebase-memory-mcp"
   chmod 755 "$UPDATE_DIR/install/codebase-memory-mcp"
-  cp "$BINARY" "$UPDATE_DIR/smoke-downloaded"
+  copy_smoke_binary "$UPDATE_DIR/smoke-downloaded"
   rm -f "$UPDATE_DIR/install/codebase-memory-mcp"
   cp "$UPDATE_DIR/smoke-downloaded" "$UPDATE_DIR/install/codebase-memory-mcp"
   chmod 755 "$UPDATE_DIR/install/codebase-memory-mcp"
@@ -2847,13 +2935,27 @@ echo "OK 12c: checksum verified"
 # 12d: extract binary
 echo "--- Phase 12d: extraction ---"
 (cd "$DL_DIR" && if [ "$DL_EXT" = "zip" ]; then unzip -q "$DL_ARCHIVE"; else tar -xzf "$DL_ARCHIVE"; fi)
-DL_BIN="$DL_DIR/codebase-memory-mcp"
+if [ "$DL_OS" = "windows" ]; then
+  DL_BIN="$DL_DIR/codebase-memory-mcp.exe"
+  DL_PAYLOAD="$DL_DIR/codebase-memory-mcp.payload.exe"
+  if [ ! -f "$DL_PAYLOAD" ]; then
+    echo "FAIL 12d: Windows payload not found after extraction"
+    exit 1
+  fi
+else
+  DL_BIN="$DL_DIR/codebase-memory-mcp"
+fi
 if [ ! -f "$DL_BIN" ]; then
   echo "FAIL 12d: binary not found after extraction"
   exit 1
 fi
 chmod +x "$DL_BIN"
 echo "OK 12d: binary extracted"
+
+if [ "$DL_OS" = "windows" ] && ! "$DL_PAYLOAD" --version > /dev/null 2>&1; then
+  echo "FAIL 12d: extracted Windows payload doesn't run"
+  exit 1
+fi
 
 # 12e: extracted binary runs
 if ! "$DL_BIN" --version > /dev/null 2>&1; then

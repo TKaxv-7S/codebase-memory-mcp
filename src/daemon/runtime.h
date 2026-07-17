@@ -47,8 +47,7 @@
 #define CBM_DAEMON_ACTIVATION_SHUTDOWN_REQUEST_SIZE 137U
 #define CBM_DAEMON_ACTIVATION_SHUTDOWN_RESPONSE_SIZE 24U
 #define CBM_DAEMON_RUNTIME_PROJECT_KEY_MAX 4096U
-#define CBM_DAEMON_RUNTIME_APPLICATION_PAYLOAD_MAX \
-    (CBM_DAEMON_MAX_FRAME_SIZE - 16U)
+#define CBM_DAEMON_RUNTIME_APPLICATION_PAYLOAD_MAX (CBM_DAEMON_MAX_FRAME_SIZE - 16U)
 
 /* Frame flags are operation codes. Every operation has one exact payload
  * length (or an explicitly length-prefixed payload); trailing bytes are a
@@ -112,21 +111,17 @@ typedef enum {
 
 typedef void cbm_daemon_runtime_application_session_t;
 
-typedef cbm_daemon_runtime_application_session_t *
-(*cbm_daemon_runtime_application_session_open_fn)(
-    void *context, cbm_daemon_client_id_t client_id,
-    uint64_t authenticated_process_id);
+typedef cbm_daemon_runtime_application_session_t *(*cbm_daemon_runtime_application_session_open_fn)(
+    void *context, cbm_daemon_client_id_t client_id, uint64_t authenticated_process_id);
 
 /* For OK, response_out may receive a malloc-owned binary buffer which the
  * runtime frees after sending; NULL is valid only for a zero-length response.
  * Non-OK results must leave an empty response. The request buffer is an owned
  * runtime copy and remains valid only for the duration of this callback. */
-typedef cbm_daemon_runtime_application_status_t
-(*cbm_daemon_runtime_application_request_fn)(
+typedef cbm_daemon_runtime_application_status_t (*cbm_daemon_runtime_application_request_fn)(
     void *context, cbm_daemon_runtime_application_session_t *session,
-    cbm_daemon_runtime_application_token_t request_token,
-    const uint8_t *request, uint32_t request_length, uint8_t **response_out,
-    uint32_t *response_length_out);
+    cbm_daemon_runtime_application_token_t request_token, const uint8_t *request,
+    uint32_t request_length, uint8_t **response_out, uint32_t *response_length_out);
 
 /* Request cancellation is non-terminal and may arrive before request() enters.
  * The exact token must therefore remain sticky until that request observes it.
@@ -199,9 +194,8 @@ typedef struct {
  * endpoint fields. Strings are NUL-terminated and zero padded. Encoding and
  * validation depend only on these stable fields; detailed identity fields may
  * be zero or unknown without changing the bytes. */
-bool cbm_daemon_runtime_hello_request_encode(
-    uint8_t out[CBM_DAEMON_RENDEZVOUS_REQUEST_SIZE],
-    const cbm_daemon_build_identity_t *identity);
+bool cbm_daemon_runtime_hello_request_encode(uint8_t out[CBM_DAEMON_RENDEZVOUS_REQUEST_SIZE],
+                                             const cbm_daemon_build_identity_t *identity);
 
 /* Resolve process_id through the OS kernel's process metadata and hash the
  * executable image rather than reopening an unbound pathname. Linux hashes an
@@ -219,8 +213,8 @@ bool cbm_daemon_runtime_hello_request_encode(
  * byte-identical copies remain compatible while changed copies are rejected.
  * Stateful HELLO admission requires the proven or computed fingerprint to
  * match both the claimed and active build fingerprints. */
-bool cbm_daemon_runtime_process_build_fingerprint(
-    uint64_t process_id, char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]);
+bool cbm_daemon_runtime_process_build_fingerprint(uint64_t process_id,
+                                                  char out[CBM_DAEMON_BUILD_FINGERPRINT_SIZE]);
 
 /* Ask any current daemon generation to drain before install/update/uninstall.
  * This is not a normal HELLO and never creates an application session. The
@@ -229,8 +223,7 @@ bool cbm_daemon_runtime_process_build_fingerprint(
  * return means a fixed response was received; inspect result_out->accepted.
  * timeout_ms must be finite. */
 bool cbm_daemon_runtime_request_activation_shutdown(
-    const cbm_daemon_ipc_endpoint_t *endpoint,
-    const cbm_daemon_build_identity_t *identity,
+    const cbm_daemon_ipc_endpoint_t *endpoint, const cbm_daemon_build_identity_t *identity,
     cbm_daemon_runtime_activation_action_t action, uint32_t timeout_ms,
     cbm_daemon_runtime_activation_result_t *result_out);
 
@@ -252,23 +245,22 @@ cbm_daemon_runtime_service_t *cbm_daemon_runtime_service_start_reserved(
     const cbm_daemon_runtime_service_config_t *config,
     cbm_daemon_ipc_lifetime_reservation_t **reservation_io);
 
-cbm_daemon_runtime_service_state_t
-cbm_daemon_runtime_service_state(cbm_daemon_runtime_service_t *service);
+cbm_daemon_runtime_service_state_t cbm_daemon_runtime_service_state(
+    cbm_daemon_runtime_service_t *service);
 size_t cbm_daemon_runtime_service_active_clients(cbm_daemon_runtime_service_t *service);
 /* Includes accepted connections still waiting for HELLO. Never exceeds the
  * configured max_clients; over-cap peers receive REJECTED before close. */
-size_t cbm_daemon_runtime_service_active_connections(
-    cbm_daemon_runtime_service_t *service);
+size_t cbm_daemon_runtime_service_active_connections(cbm_daemon_runtime_service_t *service);
 size_t cbm_daemon_runtime_service_job_subscribers(cbm_daemon_runtime_service_t *service,
                                                   const char *project_key);
-uint64_t cbm_daemon_runtime_service_client_process_id(
-    cbm_daemon_runtime_service_t *service, cbm_daemon_client_id_t client_id);
+uint64_t cbm_daemon_runtime_service_client_process_id(cbm_daemon_runtime_service_t *service,
+                                                      cbm_daemon_client_id_t client_id);
 
 /* Wait functions use a monotonic deadline and never sleep past timeout_ms. */
 bool cbm_daemon_runtime_service_wait_for_clients(cbm_daemon_runtime_service_t *service,
                                                  size_t expected, uint32_t timeout_ms);
-bool cbm_daemon_runtime_service_wait_for_connections(
-    cbm_daemon_runtime_service_t *service, size_t expected, uint32_t timeout_ms);
+bool cbm_daemon_runtime_service_wait_for_connections(cbm_daemon_runtime_service_t *service,
+                                                     size_t expected, uint32_t timeout_ms);
 bool cbm_daemon_runtime_service_wait_exited(cbm_daemon_runtime_service_t *service,
                                             uint32_t timeout_ms);
 
@@ -280,8 +272,7 @@ bool cbm_daemon_runtime_service_job_reaped(cbm_daemon_runtime_service_t *service
 /* Emergency/test teardown only. Normal lifetime is connection-owned: the
  * final disconnect makes STOPPING terminal, drains/reaps within the configured
  * bound, and exits automatically. stop is itself bounded by timeout_ms. */
-bool cbm_daemon_runtime_service_stop(cbm_daemon_runtime_service_t *service,
-                                     uint32_t timeout_ms);
+bool cbm_daemon_runtime_service_stop(cbm_daemon_runtime_service_t *service, uint32_t timeout_ms);
 /* Before wait_exited or a successful stop this returns false without teardown.
  * Otherwise it returns true only after every thread is joined, the owned
  * participant guard is released, and the service allocation is destroyed. A
@@ -293,57 +284,46 @@ bool cbm_daemon_runtime_service_free(cbm_daemon_runtime_service_t *service);
  * mismatch result (and persists it) before closing a rejected connection.
  * Client exchange timeouts must be finite, not CBM_DAEMON_IPC_WAIT_FOREVER. */
 cbm_daemon_runtime_client_t *cbm_daemon_runtime_client_connect(
-    const cbm_daemon_ipc_endpoint_t *endpoint,
-    const cbm_daemon_build_identity_t *identity, uint32_t timeout_ms,
-    cbm_daemon_runtime_connect_result_t *result_out);
+    const cbm_daemon_ipc_endpoint_t *endpoint, const cbm_daemon_build_identity_t *identity,
+    uint32_t timeout_ms, cbm_daemon_runtime_connect_result_t *result_out);
 
-cbm_daemon_client_id_t
-cbm_daemon_runtime_client_id(const cbm_daemon_runtime_client_t *client);
-uint64_t cbm_daemon_runtime_client_process_id(
-    const cbm_daemon_runtime_client_t *client);
+cbm_daemon_client_id_t cbm_daemon_runtime_client_id(const cbm_daemon_runtime_client_t *client);
+uint64_t cbm_daemon_runtime_client_process_id(const cbm_daemon_runtime_client_t *client);
 
 cbm_daemon_subscription_result_t cbm_daemon_runtime_client_job_subscribe(
     cbm_daemon_runtime_client_t *client, const char *project_key,
     cbm_daemon_subscription_id_t *subscription_id_out, uint32_t timeout_ms);
-bool cbm_daemon_runtime_client_job_unsubscribe(
-    cbm_daemon_runtime_client_t *client,
-    cbm_daemon_subscription_id_t subscription_id, uint32_t timeout_ms);
-bool cbm_daemon_runtime_client_heartbeat(cbm_daemon_runtime_client_t *client,
-                                         uint32_t timeout_ms);
+bool cbm_daemon_runtime_client_job_unsubscribe(cbm_daemon_runtime_client_t *client,
+                                               cbm_daemon_subscription_id_t subscription_id,
+                                               uint32_t timeout_ms);
+bool cbm_daemon_runtime_client_heartbeat(cbm_daemon_runtime_client_t *client, uint32_t timeout_ms);
 
 /* Reserve a monotonically increasing token for the next application request.
  * Only one unstarted reservation may exist per client. It must be consumed by
  * request_tagged() (or the client must be closed) before another reservation.
  * Tokens are never reused within a client connection. */
 bool cbm_daemon_runtime_client_application_token_reserve(
-    cbm_daemon_runtime_client_t *client,
-    cbm_daemon_runtime_application_token_t *token_out);
+    cbm_daemon_runtime_client_t *client, cbm_daemon_runtime_application_token_t *token_out);
 
 /* Send a one-way cancellation control for an exact reserved/active request.
  * ACCEPTED means the control was queued or written; callback completion is the
  * final cancellation linearization point. Stale/wrong tokens are harmless. */
-cbm_daemon_runtime_cancel_result_t
-cbm_daemon_runtime_client_application_cancel(
-    cbm_daemon_runtime_client_t *client,
-    cbm_daemon_runtime_application_token_t request_token);
+cbm_daemon_runtime_cancel_result_t cbm_daemon_runtime_client_application_cancel(
+    cbm_daemon_runtime_client_t *client, cbm_daemon_runtime_application_token_t request_token);
 
 /* Executes one binary application request. Calls on one client are serialized.
  * response_out is malloc-owned on OK and must be freed by the caller; an empty
  * OK response is represented by NULL/0. Invalid/oversized requests are rejected
  * locally without poisoning an otherwise usable client. */
-cbm_daemon_runtime_application_status_t
-cbm_daemon_runtime_client_application_request(
-    cbm_daemon_runtime_client_t *client, const void *request,
-    uint32_t request_length, uint8_t **response_out,
-    uint32_t *response_length_out, uint32_t timeout_ms);
+cbm_daemon_runtime_application_status_t cbm_daemon_runtime_client_application_request(
+    cbm_daemon_runtime_client_t *client, const void *request, uint32_t request_length,
+    uint8_t **response_out, uint32_t *response_length_out, uint32_t timeout_ms);
 
 /* Execute using the sole outstanding token returned by token_reserve(). This
  * is the cancellable frontend path; the legacy helper above reserves
  * internally. */
-cbm_daemon_runtime_application_status_t
-cbm_daemon_runtime_client_application_request_tagged(
-    cbm_daemon_runtime_client_t *client,
-    cbm_daemon_runtime_application_token_t request_token,
+cbm_daemon_runtime_application_status_t cbm_daemon_runtime_client_application_request_tagged(
+    cbm_daemon_runtime_client_t *client, cbm_daemon_runtime_application_token_t request_token,
     const void *request, uint32_t request_length, uint8_t **response_out,
     uint32_t *response_length_out, uint32_t timeout_ms);
 
@@ -364,7 +344,6 @@ bool cbm_daemon_runtime_client_close_finish(cbm_daemon_runtime_client_t *client,
  * safe with one exchange that was already in flight, but callers with a worker
  * that may be immediately about to enter an exchange must use the two-phase API
  * and join that worker before close_finish. */
-bool cbm_daemon_runtime_client_close(cbm_daemon_runtime_client_t *client,
-                                     uint32_t timeout_ms);
+bool cbm_daemon_runtime_client_close(cbm_daemon_runtime_client_t *client, uint32_t timeout_ms);
 
 #endif /* CBM_DAEMON_RUNTIME_H */

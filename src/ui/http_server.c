@@ -756,8 +756,7 @@ static void handle_adr_get(cbm_http_conn_t *c, const cbm_http_req_t *req) {
 }
 
 /* POST /api/adr — save ADR content. Body: {"project":"...","content":"..."} */
-static void handle_adr_save(cbm_http_server_t *srv, cbm_http_conn_t *c,
-                            const cbm_http_req_t *req) {
+static void handle_adr_save(cbm_http_server_t *srv, cbm_http_conn_t *c, const cbm_http_req_t *req) {
     if (req->body_len == 0 || req->body_len > 16384) {
         cbm_http_replyf(c, 400, g_cors_json, "{\"error\":\"invalid body\"}");
         return;
@@ -781,8 +780,7 @@ static void handle_adr_save(cbm_http_server_t *srv, cbm_http_conn_t *c,
     const char *proj = yyjson_get_str(v_proj);
     const char *content = yyjson_get_str(v_content);
 
-    if (srv->mutation_begin &&
-        !srv->mutation_begin(srv->mutation_context, proj)) {
+    if (srv->mutation_begin && !srv->mutation_begin(srv->mutation_context, proj)) {
         yyjson_doc_free(doc);
         cbm_http_replyf(c, 423, g_cors_json,
                         "{\"error\":\"project is busy; retry after indexing\"}");
@@ -935,18 +933,16 @@ static void *index_thread_fn(void *arg) {
     cbm_log_info("ui.index.start", "path", job->root_path);
     cbm_http_server_t *server = job->server;
     int result = server && server->index_executor
-                     ? server->index_executor(server->index_executor_context,
-                                              job->root_path, job->project_name)
+                     ? server->index_executor(server->index_executor_context, job->root_path,
+                                              job->project_name)
                      : -1;
     if (result != 0) {
-        snprintf(job->error_msg, sizeof(job->error_msg),
-                 "daemon index operation failed");
+        snprintf(job->error_msg, sizeof(job->error_msg), "daemon index operation failed");
         atomic_store(&job->status, 3);
     } else {
         atomic_store(&job->status, 2);
     }
-    cbm_log_info("ui.index.done", "path", job->root_path, "rc",
-                 result == 0 ? "ok" : "err");
+    cbm_log_info("ui.index.done", "path", job->root_path, "rc", result == 0 ? "ok" : "err");
     return NULL;
 }
 
@@ -1069,8 +1065,7 @@ static void handle_delete_project(cbm_http_server_t *srv, cbm_http_conn_t *c,
         return;
     }
 
-    if (srv->mutation_begin &&
-        !srv->mutation_begin(srv->mutation_context, name)) {
+    if (srv->mutation_begin && !srv->mutation_begin(srv->mutation_context, name)) {
         cbm_http_replyf(c, 423, g_cors_json,
                         "{\"error\":\"project is busy; retry after indexing\"}");
         return;
@@ -1675,8 +1670,8 @@ static char *http_read_only_index_rejected(void *context, const char *repo_path,
     (void)context;
     (void)repo_path;
     (void)args_json;
-    return cbm_mcp_text_result(
-        "UI RPC indexing is disabled; use the coordinated /api/index route", true);
+    return cbm_mcp_text_result("UI RPC indexing is disabled; use the coordinated /api/index route",
+                               true);
 }
 
 cbm_http_server_t *cbm_http_server_new(int port) {
@@ -1695,8 +1690,7 @@ cbm_http_server_t *cbm_http_server_new(int port) {
         return NULL;
     }
     cbm_mcp_server_set_background_tasks(srv->mcp, false);
-    cbm_mcp_server_set_index_executor(srv->mcp,
-                                      http_read_only_index_rejected, srv);
+    cbm_mcp_server_set_index_executor(srv->mcp, http_read_only_index_rejected, srv);
 
     /* Bind to localhost only (httpd refuses anything else by construction) */
     srv->listener = cbm_httpd_listen(port);
@@ -1792,8 +1786,7 @@ void cbm_http_server_set_watcher(cbm_http_server_t *srv, struct cbm_watcher *wat
     }
 }
 
-void cbm_http_server_set_index_executor(cbm_http_server_t *srv,
-                                        cbm_http_index_executor_fn executor,
+void cbm_http_server_set_index_executor(cbm_http_server_t *srv, cbm_http_index_executor_fn executor,
                                         void *context) {
     if (srv) {
         srv->index_executor = executor;
@@ -1801,15 +1794,15 @@ void cbm_http_server_set_index_executor(cbm_http_server_t *srv,
     }
 }
 
-void cbm_http_server_set_project_mutation_guard(
-    cbm_http_server_t *srv, cbm_http_project_mutation_begin_fn begin,
-    cbm_http_project_mutation_end_fn end, void *context) {
+void cbm_http_server_set_project_mutation_guard(cbm_http_server_t *srv,
+                                                cbm_http_project_mutation_begin_fn begin,
+                                                cbm_http_project_mutation_end_fn end,
+                                                void *context) {
     if (!srv || ((begin == NULL) != (end == NULL))) {
         return;
     }
     srv->mutation_begin = begin;
     srv->mutation_end = end;
     srv->mutation_context = begin ? context : NULL;
-    cbm_mcp_server_set_project_mutation_guard(srv->mcp, begin, end,
-                                              begin ? context : NULL);
+    cbm_mcp_server_set_project_mutation_guard(srv->mcp, begin, end, begin ? context : NULL);
 }

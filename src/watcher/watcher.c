@@ -458,8 +458,8 @@ static bool watcher_unlink_cached_file(const char *project_name, const char *pat
     int unlink_errno = errno;
     char errno_text[CBM_SZ_32];
     snprintf(errno_text, sizeof(errno_text), "%d", unlink_errno);
-    cbm_log_warn("watcher.root_prune_delete_failed", "project", project_name,
-                 "artifact", artifact, "path", path, "errno", errno_text);
+    cbm_log_warn("watcher.root_prune_delete_failed", "project", project_name, "artifact", artifact,
+                 "path", path, "errno", errno_text);
     return false;
 }
 
@@ -488,20 +488,17 @@ static bool delete_cached_project_db(const char *project_name) {
     }
     int written = snprintf(path, path_capacity, "%s/%s.db", cache_dir, project_name);
     bool formatted = written > 0 && (size_t)written < path_capacity;
-    bool removed = formatted &&
-                   watcher_unlink_cached_file(project_name, path, "database");
+    bool removed = formatted && watcher_unlink_cached_file(project_name, path, "database");
     /* If the main DB could not be removed, preserve WAL/SHM: together they
      * may be the only recoverable committed generation. */
     if (removed) {
         written = snprintf(sidecar, path_capacity + sizeof("-wal"), "%s-wal", path);
-        removed = written > 0 &&
-                  (size_t)written < path_capacity + sizeof("-wal") &&
+        removed = written > 0 && (size_t)written < path_capacity + sizeof("-wal") &&
                   watcher_unlink_cached_file(project_name, sidecar, "wal");
     }
     if (removed) {
         written = snprintf(sidecar, path_capacity + sizeof("-wal"), "%s-shm", path);
-        removed = written > 0 &&
-                  (size_t)written < path_capacity + sizeof("-wal") &&
+        removed = written > 0 && (size_t)written < path_capacity + sizeof("-wal") &&
                   watcher_unlink_cached_file(project_name, sidecar, "shm");
     }
     free(path);
@@ -559,10 +556,10 @@ void cbm_watcher_free(cbm_watcher_t *w) {
     free(w);
 }
 
-void cbm_watcher_set_project_mutation_guard(
-    cbm_watcher_t *w, cbm_watcher_project_mutation_begin_fn begin,
-    cbm_watcher_project_mutation_end_fn end, cbm_watcher_project_pruned_fn pruned,
-    void *context) {
+void cbm_watcher_set_project_mutation_guard(cbm_watcher_t *w,
+                                            cbm_watcher_project_mutation_begin_fn begin,
+                                            cbm_watcher_project_mutation_end_fn end,
+                                            cbm_watcher_project_pruned_fn pruned, void *context) {
     if (!w) {
         return;
     }
@@ -757,8 +754,8 @@ static void prune_missing_project(cbm_watcher_t *w, project_state_t *s) {
 
     bool removed = false;
     cbm_mutex_lock(&w->coordination_lock);
-    bool mutation_acquired = !w->mutation_begin ||
-                             w->mutation_begin(w->mutation_context, project_name);
+    bool mutation_acquired =
+        !w->mutation_begin || w->mutation_begin(w->mutation_context, project_name);
     if (!mutation_acquired) {
         cbm_mutex_unlock(&w->coordination_lock);
         free(project_name);
@@ -774,12 +771,11 @@ static void prune_missing_project(cbm_watcher_t *w, project_state_t *s) {
      * never pruned. */
     int stat_errno = 0;
     uint64_t now_ms = cbm_now_ms();
-    bool still_eligible = current == s && strcmp(current->root_path, root_path) == 0 &&
-                          current->missing_root_count >= MISSING_ROOT_DELETE_AFTER &&
-                          current->first_missing_ms > 0 &&
-                          now_ms - current->first_missing_ms >=
-                              (uint64_t)prune_grace_s() * CBM_MSEC_PER_SEC &&
-                          root_status(root_path, &stat_errno) == ROOT_MISSING;
+    bool still_eligible =
+        current == s && strcmp(current->root_path, root_path) == 0 &&
+        current->missing_root_count >= MISSING_ROOT_DELETE_AFTER && current->first_missing_ms > 0 &&
+        now_ms - current->first_missing_ms >= (uint64_t)prune_grace_s() * CBM_MSEC_PER_SEC &&
+        root_status(root_path, &stat_errno) == ROOT_MISSING;
     if (still_eligible && defer_state_free(w, s)) {
         if (delete_cached_project_db(project_name)) {
             atomic_store_explicit(&s->registered, false, memory_order_release);

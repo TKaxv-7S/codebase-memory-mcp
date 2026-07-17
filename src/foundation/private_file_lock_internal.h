@@ -20,8 +20,7 @@ typedef enum {
  * releases that guard and always reacquires it before returning. */
 cbm_private_fork_condition_t *cbm_private_fork_condition_new(void);
 void cbm_private_fork_condition_free(cbm_private_fork_condition_t *condition);
-void cbm_private_fork_condition_broadcast_while_guarded(
-    cbm_private_fork_condition_t *condition);
+void cbm_private_fork_condition_broadcast_while_guarded(cbm_private_fork_condition_t *condition);
 cbm_private_fork_wait_status_t cbm_private_fork_condition_wait_until_while_guarded(
     cbm_private_fork_condition_t *condition, uint64_t deadline_ms);
 
@@ -36,6 +35,7 @@ cbm_private_file_lock_status_t cbm_private_lock_directory_adopt_windows(
  * CloseHandle cleanup attempt fail before invocation. */
 bool cbm_private_lock_directory_fail_lock_attempt_cleanup_for_test(
     cbm_private_lock_directory_t *directory);
+
 #else
 /* On success ownership of directory_fd transfers to the returned object. On
  * failure the caller still owns it. stable_path must name that exact handle. */
@@ -54,11 +54,12 @@ bool cbm_private_file_lock_unlock_complete(const cbm_private_file_lock_t *lock);
  * Reads require SH or EX ownership; writes require EX ownership. The handle
  * validated at acquisition remains the authority, so callers never reopen a
  * user-controlled path. Payloads are capped at 4096 bytes. */
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(
-    cbm_private_file_lock_t *lock, void *buffer, size_t capacity,
-    size_t *length_out);
-cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(
-    cbm_private_file_lock_t *lock, const void *buffer, size_t length);
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_read(cbm_private_file_lock_t *lock,
+                                                                  void *buffer, size_t capacity,
+                                                                  size_t *length_out);
+cbm_private_file_lock_status_t cbm_private_file_lock_payload_write(cbm_private_file_lock_t *lock,
+                                                                   const void *buffer,
+                                                                   size_t length);
 
 /* Forces the next successfully acquired native lock down the post-lock
  * validation cleanup path and injects pre-call release failures there. */

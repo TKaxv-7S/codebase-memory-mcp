@@ -160,6 +160,13 @@ LSP_UNITY_DEPS = $(CBM_DIR)/lsp_all.c \
 
 # Tree-sitter runtime
 TS_RUNTIME_SRC = $(CBM_DIR)/ts_runtime.c
+TS_RUNTIME_DEPS = \
+	$(TS_RUNTIME_SRC) \
+	$(wildcard $(CBM_DIR)/vendored/ts_runtime/include/tree_sitter/*.h) \
+	$(wildcard $(CBM_DIR)/vendored/ts_runtime/src/*.c) \
+	$(wildcard $(CBM_DIR)/vendored/ts_runtime/src/*.h) \
+	$(wildcard $(CBM_DIR)/vendored/ts_runtime/src/portable/*.h) \
+	$(wildcard $(CBM_DIR)/vendored/ts_runtime/src/unicode/*.h)
 
 # All 64 grammar shim files
 GRAMMAR_SRCS = $(wildcard $(CBM_DIR)/grammar_*.c)
@@ -262,7 +269,12 @@ GIT_SRCS = src/git/git_context.c
 CLI_SRCS = src/cli/cli.c src/cli/progress_sink.c src/cli/hook_augment.c \
 	src/cli/agent_clients.c src/cli/agent_profiles.c \
 	src/cli/config_json_like.c src/cli/config_toml_edit.c src/cli/config_yaml_edit.c \
-	src/cli/config_text_edit.c src/cli/activation_transaction.c
+	src/cli/config_text_edit.c src/cli/activation_transaction.c \
+	src/cli/windows_launcher_state.c
+
+# Tiny permanent Windows launcher.  It deliberately links only the stable
+# launcher-state module and Windows SDK libraries, never the parser/indexer.
+WINDOWS_LAUNCHER_SRC = src/launcher/windows_launcher.c
 
 # UI module (graph visualization)
 UI_SRCS = \
@@ -435,7 +447,8 @@ TEST_TRACES_SRCS = tests/test_traces.c
 TEST_CLI_SRCS = tests/test_cli.c tests/test_agent_clients.c tests/test_agent_profiles.c \
 	tests/test_config_json_like.c \
 	tests/test_config_toml_edit.c tests/test_config_yaml_edit.c tests/test_config_text_edit.c \
-	tests/test_activation_transaction.c
+	tests/test_activation_transaction.c \
+	tests/test_windows_launcher_state.c
 
 TEST_MEM_SRCS = tests/test_mem.c
 
@@ -545,7 +558,7 @@ PP_OBJ_TSAN = $(BUILD_DIR)/tsan_preprocessor.o
 
 # ── Targets ──────────────────────────────────────────────────────
 
-.PHONY: test test-repro test-foundation test-tsan test-daemon-smoke cbm cbm-with-ui frontend embed clean-c lint lint-tidy lint-cppcheck lint-format security
+.PHONY: test test-repro test-foundation test-tsan test-daemon-smoke cbm cbm-launcher cbm-with-ui frontend embed clean-c lint lint-tidy lint-cppcheck lint-format security
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -563,7 +576,7 @@ test-foundation: $(BUILD_DIR)/test-foundation
 $(BUILD_DIR)/%.o: $(CBM_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TEST) -c -o $@ $<
 
-$(BUILD_DIR)/ts_runtime.o: $(CBM_DIR)/ts_runtime.c | $(BUILD_DIR)
+$(BUILD_DIR)/ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TEST) -c -o $@ $<
 
 $(BUILD_DIR)/lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
@@ -575,7 +588,7 @@ $(BUILD_DIR)/preprocessor.o: $(CBM_DIR)/preprocessor.cpp | $(BUILD_DIR)
 $(BUILD_DIR)/tsan_%.o: $(CBM_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TSAN) -c -o $@ $<
 
-$(BUILD_DIR)/tsan_ts_runtime.o: $(CBM_DIR)/ts_runtime.c | $(BUILD_DIR)
+$(BUILD_DIR)/tsan_ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS_TSAN) -c -o $@ $<
 
 $(BUILD_DIR)/tsan_lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
@@ -725,7 +738,7 @@ PP_OBJ_PROD = $(BUILD_DIR)/prod_preprocessor.o
 $(BUILD_DIR)/prod_%.o: $(CBM_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/prod_ts_runtime.o: $(CBM_DIR)/ts_runtime.c | $(BUILD_DIR)
+$(BUILD_DIR)/prod_ts_runtime.o: $(TS_RUNTIME_DEPS) | $(BUILD_DIR)
 	$(CC) $(GRAMMAR_CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/prod_lsp_all.o: $(LSP_UNITY_DEPS) | $(BUILD_DIR)
@@ -750,6 +763,26 @@ OBJS_VENDORED_PROD = $(MIMALLOC_OBJ_PROD) $(SQLITE3_OBJ_PROD) $(TRE_OBJ_PROD) $(
 
 MAIN_SRC = src/main.c
 
+WINDOWS_LAUNCHER_TARGET :=
+ifeq ($(IS_MINGW),yes)
+WINDOWS_LAUNCHER_TARGET := $(BUILD_DIR)/codebase-memory-mcp-launcher.exe
+endif
+
+# Keep the explicit .exe target even on non-Windows hosts: packaging contracts
+# and native-Windows invocations share this single artifact name.  A non-Windows
+# direct invocation builds a diagnostic stub and is not part of `cbm`.
+$(BUILD_DIR)/codebase-memory-mcp-launcher.exe: $(WINDOWS_LAUNCHER_SRC) src/cli/windows_launcher_state.c src/cli/windows_launcher_state.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS_PROD) -o $@ \
+		$(WINDOWS_LAUNCHER_SRC) src/cli/windows_launcher_state.c \
+		$(if $(filter yes,$(IS_MINGW)),-municode -lbcrypt $(WIN32_LIBS),)
+
+# Native-Windows compatibility fixture: its launcher ABI intentionally does
+# not fit the production payload's default [1,1] range.  It is never packaged.
+$(BUILD_DIR)/codebase-memory-mcp-launcher-abi2.exe: $(WINDOWS_LAUNCHER_SRC) src/cli/windows_launcher_state.c src/cli/windows_launcher_state.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS_PROD) -DCBM_WINDOWS_LAUNCHER_ABI_CURRENT=2 -o $@ \
+		$(WINDOWS_LAUNCHER_SRC) src/cli/windows_launcher_state.c \
+		$(if $(filter yes,$(IS_MINGW)),-municode -lbcrypt $(WIN32_LIBS),)
+
 $(BUILD_DIR)/codebase-memory-mcp: $(MAIN_SRC) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_PROD) | $(BUILD_DIR)
 	$(CC) $(CFLAGS_PROD) -o $@ \
 		$(MAIN_SRC) $(PROD_SRCS) \
@@ -757,8 +790,11 @@ $(BUILD_DIR)/codebase-memory-mcp: $(MAIN_SRC) $(PROD_SRCS) $(EXTRACTION_SRCS) $(
 		$(OBJS_VENDORED_PROD) \
 		$(LDFLAGS)
 
-cbm: $(BUILD_DIR)/codebase-memory-mcp
+cbm: $(BUILD_DIR)/codebase-memory-mcp $(WINDOWS_LAUNCHER_TARGET)
 	@echo "Built: $(BUILD_DIR)/codebase-memory-mcp"
+
+cbm-launcher: $(BUILD_DIR)/codebase-memory-mcp-launcher.exe
+	@echo "Built: $(BUILD_DIR)/codebase-memory-mcp-launcher.exe"
 
 # ── Build with embedded UI (requires Node.js) ───────────────────
 
@@ -775,7 +811,7 @@ frontend:
 embed: frontend
 	scripts/embed-frontend.sh graph-ui/dist $(BUILD_DIR)/embedded
 
-cbm-with-ui: embed $(OBJS_VENDORED_PROD)
+cbm-with-ui: embed $(OBJS_VENDORED_PROD) $(WINDOWS_LAUNCHER_TARGET)
 	$(CC) $(CFLAGS_PROD) -o $(BUILD_DIR)/codebase-memory-mcp \
 		$(MAIN_SRC) $(PROD_SRCS_WITH_ASSETS) \
 		$(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) \
@@ -804,7 +840,7 @@ SYSROOT_FLAG = $(if $(SYSROOT),-isysroot $(SYSROOT),)
 LINT_SRCS = $(FOUNDATION_SRCS) $(STORE_SRCS) $(CYPHER_SRCS) $(MCP_SRCS) $(DAEMON_SRCS) \
             $(DISCOVER_SRCS) $(GRAPH_BUFFER_SRCS) $(PIPELINE_SRCS) $(SIMHASH_SRCS) $(SEMANTIC_SRCS) \
             $(TRACES_SRCS) $(WATCHER_SRCS) $(CLI_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) \
-            $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(MAIN_SRC)
+            $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(MAIN_SRC) $(WINDOWS_LAUNCHER_SRC)
 LINT_HDRS = $(wildcard src/**/*.h src/*.h $(CBM_DIR)/*.h)
 LINT_TEST_SRCS = $(ALL_TEST_SRCS)
 

@@ -355,7 +355,24 @@ extern char **environ;
 #define CBM_ENVIRON environ
 #endif
 
+static const char *platform_copy_environment_value(char *buf, size_t buf_sz, const char *value) {
+    if (!buf || buf_sz == 0 || !value) {
+        return NULL;
+    }
+    size_t length = strlen(value);
+    if (length >= buf_sz) {
+        buf[0] = '\0';
+        return NULL;
+    }
+    memcpy(buf, value, length + 1U);
+    return buf;
+}
+
 const char *cbm_safe_getenv(const char *name, char *buf, size_t buf_sz, const char *fallback) {
+    if (!name || !name[0] || !buf || buf_sz == 0) {
+        return NULL;
+    }
+    buf[0] = '\0';
 #ifdef _WIN32
     /* #996 Layer 2: _environ holds ANSI-code-page bytes, NOT UTF-8. A
      * non-ASCII value (USERPROFILE of C:\Users\Kovács János, or a Greek/CJK
@@ -367,46 +384,54 @@ const char *cbm_safe_getenv(const char *name, char *buf, size_t buf_sz, const ch
      * SQLite VFS) already assumes. */
     {
         wchar_t wname[CBM_SZ_256];
-        int wn = MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, CBM_SZ_256);
+        int wn = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, wname, CBM_SZ_256);
         if (wn > 0) {
-            wchar_t wval[CBM_SZ_2K];
-            DWORD got = GetEnvironmentVariableW(wname, wval, CBM_SZ_2K);
-            if (got > 0 && got < CBM_SZ_2K) {
-                char *utf8 = cbm_wide_to_utf8(wval);
-                if (utf8) {
-                    snprintf(buf, buf_sz, "%s", utf8);
-                    free(utf8);
-                    return buf;
+            SetLastError(ERROR_SUCCESS);
+            DWORD needed = GetEnvironmentVariableW(wname, NULL, 0U);
+            DWORD environment_error = GetLastError();
+            if (needed == 0U) {
+                if (environment_error == ERROR_ENVVAR_NOT_FOUND) {
+                    return fallback ? platform_copy_environment_value(buf, buf_sz, fallback) : NULL;
                 }
+                /* An existing empty variable is distinct from a missing one. */
+                return buf;
             }
-            if (got == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
-                if (fallback) {
-                    snprintf(buf, buf_sz, "%s", fallback);
-                    return buf;
-                }
-                buf[0] = '\0';
+            wchar_t *wval = calloc((size_t)needed, sizeof(*wval));
+            if (!wval) {
                 return NULL;
             }
+            SetLastError(ERROR_SUCCESS);
+            DWORD got = GetEnvironmentVariableW(wname, wval, needed);
+            DWORD read_error = GetLastError();
+            if (got >= needed || (got == 0U && read_error != ERROR_SUCCESS)) {
+                free(wval);
+                return NULL;
+            }
+            char *utf8 = cbm_wide_to_utf8(wval);
+            free(wval);
+            if (!utf8) {
+                return NULL;
+            }
+            const char *copied = platform_copy_environment_value(buf, buf_sz, utf8);
+            free(utf8);
+            return copied;
         }
-        /* Conversion trouble (oversized value, allocation) — fall through to
-         * the ANSI scan below rather than failing outright. */
+        return NULL;
     }
-#endif
+#else
     char **env = CBM_ENVIRON;
     if (env) {
         size_t nlen = strlen(name);
         for (; *env; env++) {
             if (strncmp(*env, name, nlen) == 0 && (*env)[nlen] == '=') {
-                snprintf(buf, buf_sz, "%s", *env + nlen + SKIP_ONE);
-                return buf;
+                return platform_copy_environment_value(buf, buf_sz, *env + nlen + SKIP_ONE);
             }
         }
     }
+#endif
     if (fallback) {
-        snprintf(buf, buf_sz, "%s", fallback);
-        return buf;
+        return platform_copy_environment_value(buf, buf_sz, fallback);
     }
-    buf[0] = '\0';
     return NULL;
 }
 
@@ -490,11 +515,16 @@ const char *cbm_app_local_dir(void) {
 /* ── Cache directory ────────────────────────── */
 
 const char *cbm_resolve_cache_dir(void) {
-    static CBM_TLS char buf[CBM_SZ_1K];
-    char tmp[CBM_SZ_256] = "";
-    cbm_safe_getenv("CBM_CACHE_DIR", tmp, sizeof(tmp), NULL);
-    if (tmp[0]) {
-        snprintf(buf, sizeof(buf), "%s", tmp);
+    static CBM_TLS char buf[CBM_SZ_4K];
+    static const char missing[] = "\x1f"
+                                  "CBM_CACHE_DIR_MISSING"
+                                  "\x1f";
+    const char *configured = cbm_safe_getenv("CBM_CACHE_DIR", buf, sizeof(buf), missing);
+    if (!configured) {
+        /* Present but not representable in the product path bound. */
+        return NULL;
+    }
+    if (strcmp(configured, missing) != 0 && configured[0]) {
         cbm_normalize_path_sep(buf);
         return buf;
     }
@@ -502,6 +532,10 @@ const char *cbm_resolve_cache_dir(void) {
     if (!home) {
         return NULL;
     }
-    snprintf(buf, sizeof(buf), "%s/.cache/codebase-memory-mcp", home);
+    int written = snprintf(buf, sizeof(buf), "%s/.cache/codebase-memory-mcp", home);
+    if (written <= 0 || (size_t)written >= sizeof(buf)) {
+        buf[0] = '\0';
+        return NULL;
+    }
     return buf;
 }

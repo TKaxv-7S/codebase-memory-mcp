@@ -438,8 +438,7 @@ typedef struct {
     char project_name[256];
 } th_ui_index_executor_t;
 
-static int th_ui_index_executor(void *opaque, const char *root_path,
-                                const char *project_name) {
+static int th_ui_index_executor(void *opaque, const char *root_path, const char *project_name) {
     th_ui_index_executor_t *executor = opaque;
     snprintf(executor->root_path, sizeof(executor->root_path), "%s", root_path);
     snprintf(executor->project_name, sizeof(executor->project_name), "%s",
@@ -476,16 +475,14 @@ static void th_ui_mutation_guard_init(th_ui_mutation_guard_t *guard, bool allow)
 
 static bool th_ui_mutation_begin(void *opaque, const char *project) {
     th_ui_mutation_guard_t *guard = opaque;
-    snprintf(guard->begin_project, sizeof(guard->begin_project), "%s",
-             project ? project : "");
+    snprintf(guard->begin_project, sizeof(guard->begin_project), "%s", project ? project : "");
     atomic_fetch_add(&guard->begin_calls, 1);
     return guard->allow;
 }
 
 static void th_ui_mutation_end(void *opaque, const char *project) {
     th_ui_mutation_guard_t *guard = opaque;
-    snprintf(guard->end_project, sizeof(guard->end_project), "%s",
-             project ? project : "");
+    snprintf(guard->end_project, sizeof(guard->end_project), "%s", project ? project : "");
     atomic_fetch_add(&guard->end_calls, 1);
 }
 
@@ -496,8 +493,8 @@ static int th_server_start_with_mutation_guard(th_server_t *ts, cbm_watcher_t *w
         return -1;
     if (watcher)
         cbm_http_server_set_watcher(ts->srv, watcher);
-    cbm_http_server_set_project_mutation_guard(ts->srv, th_ui_mutation_begin,
-                                               th_ui_mutation_end, guard);
+    cbm_http_server_set_project_mutation_guard(ts->srv, th_ui_mutation_begin, th_ui_mutation_end,
+                                               guard);
     if (cbm_thread_create(&ts->tid, 0, th_server_thread, ts->srv) != 0) {
         cbm_http_server_free(ts->srv);
         return -1;
@@ -584,9 +581,8 @@ static int ui_delete_request(th_server_t *ts, const char *target, char *resp, si
 static int ui_adr_post_request(th_server_t *ts, const char *project, const char *content,
                                char *resp, size_t respsz) {
     char body[2048];
-    int body_len = snprintf(body, sizeof(body),
-                            "{\"project\":\"%s\",\"content\":\"%s\"}", project,
-                            content);
+    int body_len =
+        snprintf(body, sizeof(body), "{\"project\":\"%s\",\"content\":\"%s\"}", project, content);
     if (body_len < 0 || (size_t)body_len >= sizeof(body))
         return 0;
 
@@ -601,18 +597,15 @@ static int ui_adr_post_request(th_server_t *ts, const char *project, const char 
     return th_http(cbm_http_server_port(ts->srv), req, resp, respsz);
 }
 
-static int ui_adr_get_request(th_server_t *ts, const char *project, char *resp,
-                              size_t respsz) {
+static int ui_adr_get_request(th_server_t *ts, const char *project, char *resp, size_t respsz) {
     char req[512];
-    int req_len = snprintf(req, sizeof(req),
-                           "GET /api/adr?project=%s HTTP/1.1\r\n\r\n", project);
+    int req_len = snprintf(req, sizeof(req), "GET /api/adr?project=%s HTTP/1.1\r\n\r\n", project);
     if (req_len < 0 || (size_t)req_len >= sizeof(req))
         return 0;
     return th_http(cbm_http_server_port(ts->srv), req, resp, respsz);
 }
 
-static int ui_adr_seed(const ui_delete_fixture_t *fx, const char *project,
-                       const char *content) {
+static int ui_adr_seed(const ui_delete_fixture_t *fx, const char *project, const char *content) {
     char db_path[1024];
     ui_delete_db_path(fx, project, db_path, sizeof(db_path));
     cbm_store_t *store = cbm_store_open_path(db_path);
@@ -696,16 +689,15 @@ TEST(ui_server_routes_indexing_through_joinable_daemon_executor) {
     ASSERT_EQ(cbm_thread_create(&ts.tid, 0, th_server_thread, ts.srv), 0);
 
     char body[1024];
-    snprintf(body, sizeof(body),
-             "{\"root_path\":\"%s\",\"project_name\":\"ui-project\"}", root);
+    snprintf(body, sizeof(body), "{\"root_path\":\"%s\",\"project_name\":\"ui-project\"}", root);
     char request[1400];
     snprintf(request, sizeof(request),
              "POST /api/index HTTP/1.1\r\nContent-Type: application/json\r\n"
              "Content-Length: %zu\r\n\r\n%s",
              strlen(body), body);
     char response[4096];
-    int response_length = th_http(cbm_http_server_port(ts.srv), request,
-                                  response, sizeof(response));
+    int response_length =
+        th_http(cbm_http_server_port(ts.srv), request, response, sizeof(response));
     bool called = th_wait_atomic_int(&executor.calls, 1, 2000);
 
     th_server_stop(&ts);
@@ -857,8 +849,7 @@ TEST(ui_server_adr_mutation_guard_busy_preserves_existing_adr) {
     ASSERT_EQ(th_server_start_with_mutation_guard(&ts, NULL, &guard), 0);
 
     char resp[4096];
-    int n = ui_adr_post_request(&ts, project, "replacement architecture", resp,
-                                sizeof(resp));
+    int n = ui_adr_post_request(&ts, project, "replacement architecture", resp, sizeof(resp));
     ASSERT_GT(n, 0);
     ASSERT_EQ(th_status(resp), 423);
     ASSERT_NOT_NULL(strstr(resp, "project is busy; retry after indexing"));
@@ -924,8 +915,7 @@ TEST(ui_server_delete_mutation_guard_busy_preserves_project) {
     ASSERT_EQ(th_server_start_with_mutation_guard(&ts, fx.watcher, &guard), 0);
 
     char resp[4096];
-    int n = ui_delete_request(&ts, "/api/project?name=ui-guard-delete-busy", resp,
-                              sizeof(resp));
+    int n = ui_delete_request(&ts, "/api/project?name=ui-guard-delete-busy", resp, sizeof(resp));
     ASSERT_GT(n, 0);
     ASSERT_EQ(th_status(resp), 423);
     ASSERT_NOT_NULL(strstr(resp, "project is busy; retry after indexing"));
@@ -961,8 +951,7 @@ TEST(ui_server_delete_mutation_guard_balances_success) {
     ASSERT_EQ(th_server_start_with_mutation_guard(&ts, fx.watcher, &guard), 0);
 
     char resp[4096];
-    int n = ui_delete_request(&ts, "/api/project?name=ui-guard-delete-success", resp,
-                              sizeof(resp));
+    int n = ui_delete_request(&ts, "/api/project?name=ui-guard-delete-success", resp, sizeof(resp));
     ASSERT_GT(n, 0);
     ASSERT_EQ(th_status(resp), 200);
     ASSERT_NOT_NULL(strstr(resp, "{\"deleted\":true}"));

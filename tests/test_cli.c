@@ -40,8 +40,7 @@
  * tests that exercise --yes. */
 void cbm_set_auto_answer_for_test(int value);
 int cbm_cli_sha256_file(const char *path, char *out, size_t out_size);
-int cbm_cli_checksum_manifest_digest(const char *manifest_path,
-                                     const char *archive_name, char *out,
+int cbm_cli_checksum_manifest_digest(const char *manifest_path, const char *archive_name, char *out,
                                      size_t out_size);
 void cbm_cli_set_activation_cleanup_failure_for_test(bool enabled);
 int cbm_cli_activation_abort_cleanup_probe_for_test(void);
@@ -54,15 +53,21 @@ TEST(cli_progress_visibility_policy) {
 }
 
 TEST(cli_raw_mcp_result_preserves_tool_error_status) {
-    ASSERT_TRUE(cbm_cli_mcp_result_is_error(
-        "{\"content\":[],\"isError\":true}"));
-    ASSERT_FALSE(cbm_cli_mcp_result_is_error(
-        "{\"content\":[],\"isError\":false}"));
-    ASSERT_FALSE(cbm_cli_mcp_result_is_error(
-        "{\"content\":[{\"text\":\"\\\"isError\\\":true\"}]}"));
+    ASSERT_TRUE(cbm_cli_mcp_result_is_error("{\"content\":[],\"isError\":true}"));
+    ASSERT_FALSE(cbm_cli_mcp_result_is_error("{\"content\":[],\"isError\":false}"));
+    ASSERT_FALSE(
+        cbm_cli_mcp_result_is_error("{\"content\":[{\"text\":\"\\\"isError\\\":true\"}]}"));
     ASSERT_FALSE(cbm_cli_mcp_result_is_error("{\"isError\":\"true\"}"));
     ASSERT_FALSE(cbm_cli_mcp_result_is_error("not-json"));
     ASSERT_FALSE(cbm_cli_mcp_result_is_error(NULL));
+    PASS();
+}
+
+TEST(cli_maintenance_cancellation_forces_failure_status) {
+    ASSERT_EQ(cbm_cli_exit_status_after_maintenance(EXIT_SUCCESS, false), EXIT_SUCCESS);
+    ASSERT_EQ(cbm_cli_exit_status_after_maintenance(7, false), 7);
+    ASSERT_EQ(cbm_cli_exit_status_after_maintenance(EXIT_SUCCESS, true), EXIT_FAILURE);
+    ASSERT_EQ(cbm_cli_exit_status_after_maintenance(7, true), 7);
     PASS();
 }
 
@@ -71,10 +76,8 @@ TEST(cli_progress_sink_accepts_worker_json_logs) {
     ASSERT_NOT_NULL(out);
 
     cbm_progress_sink_init(out);
-    cbm_progress_sink_fn(
-        "{\"level\":\"info\",\"event\":\"pipeline.discover\",\"files\":\"3\"}");
-    cbm_progress_sink_fn(
-        "{\"level\":\"info\",\"event\":\"pass.start\",\"pass\":\"structure\"}");
+    cbm_progress_sink_fn("{\"level\":\"info\",\"event\":\"pipeline.discover\",\"files\":\"3\"}");
+    cbm_progress_sink_fn("{\"level\":\"info\",\"event\":\"pass.start\",\"pass\":\"structure\"}");
     cbm_progress_sink_fini();
 
     ASSERT_EQ(fseek(out, 0, SEEK_SET), 0);
@@ -99,12 +102,11 @@ static void *cli_progress_race_worker(void *opaque) {
     cli_progress_race_arg_t *arg = opaque;
     char counts[128];
     char progress[128];
-    (void)snprintf(counts, sizeof(counts),
-                   "level=info msg=gbuf.dump nodes=%d edges=%d",
+    (void)snprintf(counts, sizeof(counts), "level=info msg=gbuf.dump nodes=%d edges=%d",
                    1000 + arg->worker_id, 2000 + arg->worker_id);
     (void)snprintf(progress, sizeof(progress),
-                   "level=info msg=parallel.extract.progress done=%d total=%d",
-                   arg->worker_id + 1, CLI_PROGRESS_RACE_THREADS);
+                   "level=info msg=parallel.extract.progress done=%d total=%d", arg->worker_id + 1,
+                   CLI_PROGRESS_RACE_THREADS);
 
     while (!atomic_load_explicit(arg->start, memory_order_acquire)) {
         cbm_usleep(100);
@@ -132,8 +134,8 @@ TEST(cli_progress_sink_serializes_concurrent_callbacks) {
     for (; created < CLI_PROGRESS_RACE_THREADS; created++) {
         args[created].start = &start;
         args[created].worker_id = created;
-        if (cbm_thread_create(&threads[created], 0, cli_progress_race_worker,
-                              &args[created]) != 0) {
+        if (cbm_thread_create(&threads[created], 0, cli_progress_race_worker, &args[created]) !=
+            0) {
             break;
         }
     }
@@ -394,8 +396,8 @@ typedef struct {
     char diagnostic[512];
 } cli_activation_fake_t;
 
-static int cli_activation_fake_reserve_mutation(
-    void *opaque, cbm_cli_activation_lock_t *lease_out) {
+static int cli_activation_fake_reserve_mutation(void *opaque,
+                                                cbm_cli_activation_lock_t *lease_out) {
     cli_activation_fake_t *fake = opaque;
     fake->mutation_reserve_count++;
     if (fake->mutation_reserve_result != 1) {
@@ -411,26 +413,20 @@ static int cli_activation_fake_reserve_mutation(
     return 1;
 }
 
-static void cli_activation_fake_release_mutation(
-    void *opaque, cbm_cli_activation_lock_t lease) {
+static void cli_activation_fake_release_mutation(void *opaque, cbm_cli_activation_lock_t lease) {
     cli_activation_fake_t *fake = opaque;
     if (lease == fake && fake->mutation_lease_held) {
         bool path_a_visible = true;
         bool path_b_visible = true;
         if (fake->guarded_path_a) {
             const char *data = read_test_file(fake->guarded_path_a);
-            path_a_visible = data &&
-                             (!fake->guarded_text_a ||
-                              strstr(data, fake->guarded_text_a));
+            path_a_visible = data && (!fake->guarded_text_a || strstr(data, fake->guarded_text_a));
         }
         if (fake->guarded_path_b) {
             const char *data = read_test_file(fake->guarded_path_b);
-            path_b_visible = data &&
-                             (!fake->guarded_text_b ||
-                              strstr(data, fake->guarded_text_b));
+            path_b_visible = data && (!fake->guarded_text_b || strstr(data, fake->guarded_text_b));
         }
-        fake->guarded_files_visible_before_unlock |=
-            path_a_visible && path_b_visible;
+        fake->guarded_files_visible_before_unlock |= path_a_visible && path_b_visible;
         fake->mutation_lease_held = false;
         fake->mutation_lease_release_count++;
         if (fake->release_marker) {
@@ -570,9 +566,7 @@ TEST(cli_activation_quiesces_active_cohort_before_mutation) {
         .visible_diagnostic = cli_activation_fake_diagnostic,
     };
 
-    ASSERT_EQ(cbm_cli_activation_guard_with_ops(
-                  &ops, cli_activation_fake_mutation, &fake),
-              0);
+    ASSERT_EQ(cbm_cli_activation_guard_with_ops(&ops, cli_activation_fake_mutation, &fake), 0);
     ASSERT_EQ(fake.mutation_reserve_count, 1);
     ASSERT_EQ(fake.quiesce_count, 1);
     ASSERT_FALSE(fake.participants_active);
@@ -677,8 +671,7 @@ static int cli_activation_abort_cleanup_probe_mutation(void *opaque) {
  * and allow another daemon generation to observe an uncertain executable. */
 TEST(cli_activation_cleanup_failure_fail_stops_before_lease_release) {
     char tmpdir[256];
-    snprintf(tmpdir, sizeof(tmpdir),
-             "/tmp/cli-activation-cleanup-fail-stop-XXXXXX");
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cli-activation-cleanup-fail-stop-XXXXXX");
     if (!cbm_mkdtemp(tmpdir)) {
         FAIL("cbm_mkdtemp failed");
     }
@@ -742,14 +735,14 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
     pid_t child = fork();
     if (child == 0) {
         close(ready_pipe[0]);
-        cbm_daemon_ipc_endpoint_t *endpoint =
-            cbm_daemon_bootstrap_endpoint_new(runtime_parent);
+        cbm_daemon_ipc_endpoint_t *endpoint = cbm_daemon_bootstrap_endpoint_new(runtime_parent);
         cbm_version_cohort_manager_t *manager =
             endpoint ? cbm_version_cohort_manager_new(endpoint) : NULL;
         char fingerprint[CBM_DAEMON_BUILD_FINGERPRINT_SIZE];
         cbm_daemon_build_identity_t identity = {
             .semantic_version = "cli-activation-test",
             .build_fingerprint = fingerprint,
+            .cache_fingerprint = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             .protocol_abi = CBM_DAEMON_RUNTIME_WIRE_ABI,
             .store_abi = 1,
             .feature_abi = 1,
@@ -757,14 +750,12 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
         cbm_version_cohort_lease_t *lease = NULL;
         cbm_daemon_conflict_t conflict;
         cbm_daemon_ipc_startup_lock_t *startup = NULL;
-        bool setup = endpoint && manager &&
-                     cbm_daemon_runtime_process_build_fingerprint(
-                         (uint64_t)getpid(), fingerprint) &&
-                     cbm_version_cohort_acquire(
-                         manager, &identity, cbm_now_ms() + 2000U, &lease,
-                         &conflict) == CBM_VERSION_COHORT_OK &&
-                     cbm_daemon_ipc_startup_lock_try_acquire(
-                         endpoint, &startup) == 1 && startup;
+        bool setup =
+            endpoint && manager &&
+            cbm_daemon_runtime_process_build_fingerprint((uint64_t)getpid(), fingerprint) &&
+            cbm_version_cohort_acquire(manager, &identity, cbm_now_ms() + 2000U, &lease,
+                                       &conflict) == CBM_VERSION_COHORT_OK &&
+            cbm_daemon_ipc_startup_lock_try_acquire(endpoint, &startup) == 1 && startup;
         char ready = setup ? 'R' : 'E';
         (void)write(ready_pipe[1], &ready, 1);
         bool saw_maintenance = false;
@@ -789,14 +780,10 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
         if (startup) {
             (void)cbm_daemon_ipc_startup_lock_release(&startup);
         }
-        while (lease &&
-               cbm_version_cohort_lease_release(&lease) !=
-                   CBM_PRIVATE_FILE_LOCK_OK) {
+        while (lease && cbm_version_cohort_lease_release(&lease) != CBM_PRIVATE_FILE_LOCK_OK) {
             cbm_usleep(1000);
         }
-        while (manager &&
-               cbm_version_cohort_manager_free(&manager) !=
-                   CBM_PRIVATE_FILE_LOCK_OK) {
+        while (manager && cbm_version_cohort_manager_free(&manager) != CBM_PRIVATE_FILE_LOCK_OK) {
             cbm_usleep(1000);
         }
         cbm_daemon_ipc_endpoint_free(endpoint);
@@ -805,8 +792,7 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
     }
     close(ready_pipe[1]);
     char ready = 0;
-    bool child_ready = child > 0 && read(ready_pipe[0], &ready, 1) == 1 &&
-                       ready == 'R';
+    bool child_ready = child > 0 && read(ready_pipe[0], &ready, 1) == 1 && ready == 'R';
     close(ready_pipe[0]);
 
     char *old_home = NULL;
@@ -822,10 +808,8 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
     char activation_log[640];
     snprintf(cache_dir, sizeof(cache_dir), "%s/cache", tmpdir);
     snprintf(install_dir, sizeof(install_dir), "%s/custom/bin", tmpdir);
-    snprintf(target_path, sizeof(target_path),
-             "%s/codebase-memory-mcp", install_dir);
-    snprintf(activation_log, sizeof(activation_log),
-             "%s/logs/activation-events.ndjson", cache_dir);
+    snprintf(target_path, sizeof(target_path), "%s/codebase-memory-mcp", install_dir);
+    snprintf(activation_log, sizeof(activation_log), "%s/logs/activation-events.ndjson", cache_dir);
     cbm_setenv("CBM_CACHE_DIR", cache_dir, 1);
     cbm_cli_set_activation_runtime_parent_for_test(runtime_parent);
     char dir_arg[640];
@@ -841,15 +825,13 @@ TEST(cli_activation_quiesce_does_not_wait_on_bootstrap_startup) {
     struct stat target_status;
     struct stat log_status;
     bool target_exists = stat(target_path, &target_status) == 0;
-    bool log_private = stat(activation_log, &log_status) == 0 &&
-                       (log_status.st_mode & 0077) == 0;
+    bool log_private = stat(activation_log, &log_status) == 0 && (log_status.st_mode & 0077) == 0;
     const char *events = read_test_file(activation_log);
     const char *requested = events ? strstr(events, "\"phase\":\"requested\"") : NULL;
     const char *stopped = events ? strstr(events, "\"phase\":\"daemon_stopped\"") : NULL;
     const char *completed = events ? strstr(events, "\"phase\":\"completed\"") : NULL;
-    bool event_order = requested && stopped && completed &&
-                       requested < stopped && stopped < completed &&
-                       strstr(events, "\"restart_required\":true") != NULL;
+    bool event_order = requested && stopped && completed && requested < stopped &&
+                       stopped < completed && strstr(events, "\"restart_required\":true") != NULL;
 
     if (old_shell) {
         cbm_setenv("SHELL", old_shell, 1);
@@ -953,13 +935,11 @@ TEST(cli_install_dir_and_skip_config_stage_first_install_safely) {
     };
     cbm_cli_activation_ops_t ops = cli_activation_fake_ops(&fake);
     cbm_cli_set_activation_ops_for_test(&ops);
-    char *argv[] = {"--force", "--skip-config", "--yes", "--dir",
-                    install_dir};
+    char *argv[] = {"--force", "--skip-config", "--yes", "--dir", install_dir};
     int rc = cbm_cmd_install(5, argv);
     char equals_arg[640];
     snprintf(equals_arg, sizeof(equals_arg), "--dir=%s", install_dir);
-    char *dry_argv[] = {"--force", "--skip-config", "--dry-run",
-                        equals_arg};
+    char *dry_argv[] = {"--force", "--skip-config", "--dry-run", equals_arg};
     int dry_rc = cbm_cmd_install(4, dry_argv);
     cbm_cli_set_activation_ops_for_test(NULL);
     cbm_set_auto_answer_for_test(0);
@@ -1057,8 +1037,7 @@ TEST(cli_install_reset_deletion_waits_for_final_activation_guard) {
     cbm_set_auto_answer_for_test(0);
 
     const char *index = read_test_file(index_path);
-    bool index_preserved =
-        index && strcmp(index, "index must survive final-guard refusal") == 0;
+    bool index_preserved = index && strcmp(index, "index must survive final-guard refusal") == 0;
     const char *installed = read_test_file(bin_target);
     bool binary_preserved = installed && strcmp(installed, "old binary must survive") == 0;
     cli_activation_restore_env(old_home, old_cache);
@@ -1216,8 +1195,7 @@ TEST(cli_install_config_and_path_finish_before_guard_release) {
  * at the wrong (or, for a fresh install, missing) executable. */
 TEST(cli_install_config_failure_keeps_published_binary) {
     char tmpdir[256];
-    snprintf(tmpdir, sizeof(tmpdir),
-             "/tmp/cli-install-partial-config-XXXXXX");
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cli-install-partial-config-XXXXXX");
     if (!cbm_mkdtemp(tmpdir)) {
         FAIL("cbm_mkdtemp failed");
     }
@@ -1237,15 +1215,12 @@ TEST(cli_install_config_failure_keeps_published_binary) {
     char bin_target[640];
     snprintf(cache_dir, sizeof(cache_dir), "%s/cache", tmpdir);
     snprintf(openclaw_dir, sizeof(openclaw_dir), "%s/.openclaw", tmpdir);
-    snprintf(openclaw_config, sizeof(openclaw_config), "%s/openclaw.json",
-             openclaw_dir);
+    snprintf(openclaw_config, sizeof(openclaw_config), "%s/openclaw.json", openclaw_dir);
     snprintf(bin_dir, sizeof(bin_dir), "%s/.local/bin", tmpdir);
 #ifdef _WIN32
-    snprintf(bin_target, sizeof(bin_target),
-             "%s/codebase-memory-mcp.exe", bin_dir);
+    snprintf(bin_target, sizeof(bin_target), "%s/codebase-memory-mcp.exe", bin_dir);
 #else
-    snprintf(bin_target, sizeof(bin_target), "%s/codebase-memory-mcp",
-             bin_dir);
+    snprintf(bin_target, sizeof(bin_target), "%s/codebase-memory-mcp", bin_dir);
 #endif
     cbm_setenv("CBM_CACHE_DIR", cache_dir, 1);
     test_mkdirp(openclaw_dir);
@@ -1471,20 +1446,17 @@ TEST(cli_update_agent_configs_finish_before_guard_release) {
     ASSERT_EQ(fseek(native_file, 0, SEEK_SET), 0);
     unsigned char *replacement = malloc((size_t)native_size);
     ASSERT_NOT_NULL(replacement);
-    ASSERT_EQ(fread(replacement, 1, (size_t)native_size, native_file),
-              (size_t)native_size);
+    ASSERT_EQ(fread(replacement, 1, (size_t)native_size, native_file), (size_t)native_size);
     ASSERT_EQ(fclose(native_file), 0);
     int archive_len = 0;
     unsigned char *archive =
-        create_test_targz("codebase-memory-mcp", replacement,
-                          (int)native_size, &archive_len);
+        create_test_targz("codebase-memory-mcp", replacement, (int)native_size, &archive_len);
     free(replacement);
     ASSERT_NOT_NULL(archive);
     snprintf(archive_path, sizeof(archive_path), "%s/%s", release_dir, asset_name);
     FILE *archive_file = fopen(archive_path, "wb");
     ASSERT_NOT_NULL(archive_file);
-    ASSERT_EQ(fwrite(archive, 1, (size_t)archive_len, archive_file),
-              (size_t)archive_len);
+    ASSERT_EQ(fwrite(archive, 1, (size_t)archive_len, archive_file), (size_t)archive_len);
     ASSERT_EQ(fclose(archive_file), 0);
     free(archive);
 
@@ -1518,10 +1490,8 @@ TEST(cli_update_agent_configs_finish_before_guard_release) {
     char openclaw_config[640];
     char bin_target[640];
     snprintf(openclaw_dir, sizeof(openclaw_dir), "%s/.openclaw", tmpdir);
-    snprintf(openclaw_config, sizeof(openclaw_config), "%s/openclaw.json",
-             openclaw_dir);
-    snprintf(bin_target, sizeof(bin_target),
-             "%s/.local/bin/codebase-memory-mcp", tmpdir);
+    snprintf(openclaw_config, sizeof(openclaw_config), "%s/openclaw.json", openclaw_dir);
+    snprintf(bin_target, sizeof(bin_target), "%s/.local/bin/codebase-memory-mcp", tmpdir);
     test_mkdirp(openclaw_dir);
     write_test_file(openclaw_config, "{ invalid config\n");
     static const char old_binary[] = "old binary before partial update";
@@ -1530,15 +1500,13 @@ TEST(cli_update_agent_configs_finish_before_guard_release) {
     cli_activation_fake_t config_failure = {
         .mutation_reserve_result = 1,
     };
-    cbm_cli_activation_ops_t failure_ops =
-        cli_activation_fake_ops(&config_failure);
+    cbm_cli_activation_ops_t failure_ops = cli_activation_fake_ops(&config_failure);
     cbm_cli_set_activation_ops_for_test(&failure_ops);
     int config_failure_rc = cbm_cmd_update(2, argv);
     cbm_cli_set_activation_ops_for_test(NULL);
     struct stat updated_status;
     bool replacement_kept = stat(bin_target, &updated_status) == 0 &&
-                            updated_status.st_size !=
-                                (off_t)(sizeof(old_binary) - 1U);
+                            updated_status.st_size != (off_t)(sizeof(old_binary) - 1U);
 
     if (old_download) {
         cbm_setenv("CBM_DOWNLOAD_URL", old_download, 1);
@@ -1557,8 +1525,7 @@ TEST(cli_update_agent_configs_finish_before_guard_release) {
     ASSERT_TRUE(replacement_kept);
     ASSERT_EQ(config_failure.mutation_reserve_count, 1);
     ASSERT_EQ(config_failure.mutation_lease_release_count, 1);
-    ASSERT_NOT_NULL(
-        strstr(config_failure.diagnostic, "executable was kept"));
+    ASSERT_NOT_NULL(strstr(config_failure.diagnostic, "executable was kept"));
     PASS();
 #endif
 }
@@ -1605,8 +1572,7 @@ TEST(cli_uninstall_quiesces_active_cohort_before_removing_binary_and_index) {
     cbm_set_auto_answer_for_test(0);
 
     const char *index = read_test_file(index_path);
-    bool index_preserved =
-        index && strcmp(index, "index must survive active-daemon refusal") == 0;
+    bool index_preserved = index && strcmp(index, "index must survive active-daemon refusal") == 0;
     const char *installed = read_test_file(bin_target);
     bool binary_preserved =
         installed && strcmp(installed, "binary must survive active-daemon refusal") == 0;
@@ -1666,8 +1632,7 @@ TEST(cli_uninstall_preserves_binary_and_index_when_cohort_does_not_drain) {
     cbm_set_auto_answer_for_test(0);
 
     const char *index = read_test_file(index_path);
-    bool index_preserved =
-        index && strcmp(index, "index must survive uninstall race") == 0;
+    bool index_preserved = index && strcmp(index, "index must survive uninstall race") == 0;
     const char *installed = read_test_file(bin_target);
     bool binary_preserved =
         installed && strcmp(installed, "binary must survive uninstall race") == 0;
@@ -2623,7 +2588,8 @@ TEST(cli_openclaw_compaction_preserves_user_owned_section) {
                                      "OPENCLAW_STATE_DIR",
                                      "OPENCLAW_CONFIG_PATH",
                                      "OPENCLAW_WORKSPACE_DIR",
-                                     "OPENCLAW_PROFILE"};
+                                     "OPENCLAW_PROFILE",
+                                     "CBM_CACHE_DIR"};
     char *saved_env[sizeof(env_names) / sizeof(env_names[0])];
     for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++) {
         saved_env[i] = save_test_env(env_names[i]);
@@ -2649,11 +2615,20 @@ TEST(cli_openclaw_compaction_preserves_user_owned_section) {
         uninstalled && !strstr(uninstalled, "Codebase Knowledge Graph (codebase-memory-mcp)");
     free(uninstalled);
 
+    const size_t cache_env_index = sizeof(env_names) / sizeof(env_names[0]) - 1;
+    const char *cache_after_uninstall = getenv("CBM_CACHE_DIR");
+    bool cache_environment_restored =
+        saved_env[cache_env_index]
+            ? cache_after_uninstall &&
+                  strcmp(cache_after_uninstall, saved_env[cache_env_index]) == 0
+            : cache_after_uninstall == NULL;
+
     for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++) {
         restore_test_env(env_names[i], saved_env[i]);
     }
     test_rmdir_r(tmpdir);
-    if (!installed_owned || !retained_existing || rc != 0 || !preserved_user || !removed_owned)
+    if (!installed_owned || !retained_existing || rc != 0 || !preserved_user || !removed_owned ||
+        !cache_environment_restored)
         FAIL("OpenClaw uninstall must remove only its namespaced compaction section");
     PASS();
 }
@@ -3306,6 +3281,249 @@ static unsigned char *create_test_zip_stored(const char *filename, const unsigne
     return zip;
 }
 
+static void test_zip_put_u16(unsigned char *output, uint16_t value) {
+    output[0] = (unsigned char)value;
+    output[1] = (unsigned char)(value >> 8);
+}
+
+static void test_zip_put_u32(unsigned char *output, uint32_t value) {
+    output[0] = (unsigned char)value;
+    output[1] = (unsigned char)(value >> 8);
+    output[2] = (unsigned char)(value >> 16);
+    output[3] = (unsigned char)(value >> 24);
+}
+
+typedef struct {
+    const char *name;
+    const unsigned char *content;
+    size_t content_size;
+} test_zip_entry_t;
+
+static unsigned char *create_test_zip_entries(const test_zip_entry_t *entries, size_t entry_count,
+                                              int *out_len) {
+    enum { TEST_ZIP_ENTRY_MAX = 8 };
+    if (!entries || !out_len || entry_count == 0 || entry_count > TEST_ZIP_ENTRY_MAX) {
+        return NULL;
+    }
+    size_t local_size = 0;
+    size_t central_size = 0;
+    for (size_t index = 0; index < entry_count; index++) {
+        size_t name_size = strlen(entries[index].name);
+        local_size += 30U + name_size + entries[index].content_size;
+        central_size += 46U + name_size;
+    }
+    size_t total = local_size + central_size + 22U;
+    if (total > INT_MAX) {
+        return NULL;
+    }
+    unsigned char *zip = calloc(1, total);
+    if (!zip) {
+        return NULL;
+    }
+    uint32_t local_offsets[TEST_ZIP_ENTRY_MAX];
+    uint32_t crcs[TEST_ZIP_ENTRY_MAX];
+    size_t cursor = 0;
+    for (size_t index = 0; index < entry_count; index++) {
+        size_t name_size = strlen(entries[index].name);
+        local_offsets[index] = (uint32_t)cursor;
+        crcs[index] =
+            (uint32_t)crc32(0L, entries[index].content, (uInt)entries[index].content_size);
+        zip[cursor] = 0x50;
+        zip[cursor + 1U] = 0x4b;
+        zip[cursor + 2U] = 0x03;
+        zip[cursor + 3U] = 0x04;
+        test_zip_put_u16(zip + cursor + 4U, 20U);
+        test_zip_put_u32(zip + cursor + 14U, crcs[index]);
+        test_zip_put_u32(zip + cursor + 18U, (uint32_t)entries[index].content_size);
+        test_zip_put_u32(zip + cursor + 22U, (uint32_t)entries[index].content_size);
+        test_zip_put_u16(zip + cursor + 26U, (uint16_t)name_size);
+        memcpy(zip + cursor + 30U, entries[index].name, name_size);
+        cursor += 30U + name_size;
+        memcpy(zip + cursor, entries[index].content, entries[index].content_size);
+        cursor += entries[index].content_size;
+    }
+
+    size_t central_offset = cursor;
+    for (size_t index = 0; index < entry_count; index++) {
+        size_t name_size = strlen(entries[index].name);
+        zip[cursor] = 0x50;
+        zip[cursor + 1U] = 0x4b;
+        zip[cursor + 2U] = 0x01;
+        zip[cursor + 3U] = 0x02;
+        test_zip_put_u16(zip + cursor + 4U, 20U);
+        test_zip_put_u16(zip + cursor + 6U, 20U);
+        test_zip_put_u32(zip + cursor + 16U, crcs[index]);
+        test_zip_put_u32(zip + cursor + 20U, (uint32_t)entries[index].content_size);
+        test_zip_put_u32(zip + cursor + 24U, (uint32_t)entries[index].content_size);
+        test_zip_put_u16(zip + cursor + 28U, (uint16_t)name_size);
+        test_zip_put_u32(zip + cursor + 42U, local_offsets[index]);
+        memcpy(zip + cursor + 46U, entries[index].name, name_size);
+        cursor += 46U + name_size;
+    }
+    size_t central_length = cursor - central_offset;
+    zip[cursor] = 0x50;
+    zip[cursor + 1U] = 0x4b;
+    zip[cursor + 2U] = 0x05;
+    zip[cursor + 3U] = 0x06;
+    test_zip_put_u16(zip + cursor + 8U, (uint16_t)entry_count);
+    test_zip_put_u16(zip + cursor + 10U, (uint16_t)entry_count);
+    test_zip_put_u32(zip + cursor + 12U, (uint32_t)central_length);
+    test_zip_put_u32(zip + cursor + 16U, (uint32_t)central_offset);
+    *out_len = (int)total;
+    return zip;
+}
+
+static unsigned char *create_test_zip_pair(const test_zip_entry_t entries[2], int *out_len) {
+    return create_test_zip_entries(entries, 2U, out_len);
+}
+
+static unsigned char *create_test_windows_release_zip(const char *launcher_name,
+                                                      const char *payload_name, int *out_len) {
+    static const unsigned char launcher[] = "MZ-launcher";
+    static const unsigned char payload[] = "MZ-payload";
+    static const unsigned char license[] = "license";
+    static const unsigned char installer[] = "installer";
+    static const unsigned char notices[] = "notices";
+    test_zip_entry_t entries[5] = {
+        {
+            .name = launcher_name,
+            .content = launcher,
+            .content_size = sizeof(launcher) - 1U,
+        },
+        {
+            .name = payload_name,
+            .content = payload,
+            .content_size = sizeof(payload) - 1U,
+        },
+        {"LICENSE", license, sizeof(license) - 1U},
+        {"install.ps1", installer, sizeof(installer) - 1U},
+        {"THIRD_PARTY_NOTICES.md", notices, sizeof(notices) - 1U},
+    };
+    return create_test_zip_entries(entries, 5U, out_len);
+}
+
+TEST(cli_extract_windows_release_pair_rejects_incomplete_release_namespace) {
+    static const unsigned char launcher[] = "MZ-launcher";
+    static const unsigned char payload[] = "MZ-payload";
+    const test_zip_entry_t entries[2] = {
+        {"codebase-memory-mcp.exe", launcher, sizeof(launcher) - 1U},
+        {"codebase-memory-mcp.payload.exe", payload, sizeof(payload) - 1U},
+    };
+    int zip_length = 0;
+    unsigned char *zip = create_test_zip_pair(entries, &zip_length);
+    ASSERT_NOT_NULL(zip);
+    cbm_windows_release_pair_t pair;
+    ASSERT_FALSE(cbm_extract_windows_release_pair_from_zip(zip, zip_length, &pair));
+    cbm_windows_release_pair_free(&pair);
+    free(zip);
+    PASS();
+}
+
+/* Release archives retain their legal notices and the standalone installer.
+ * The updater must accept that exact official namespace while extracting only
+ * the launcher/payload pair. Synthetic two-file fixtures previously hid that
+ * every published Windows update would be rejected. */
+TEST(cli_extract_windows_release_pair_accepts_official_release_namespace) {
+    static const unsigned char launcher[] = "MZ-launcher";
+    static const unsigned char payload[] = "MZ-payload";
+    static const unsigned char license[] = "license";
+    static const unsigned char installer[] = "installer";
+    static const unsigned char notices[] = "notices";
+    const test_zip_entry_t entries[] = {
+        {"codebase-memory-mcp.exe", launcher, sizeof(launcher) - 1U},
+        {"codebase-memory-mcp.payload.exe", payload, sizeof(payload) - 1U},
+        {"LICENSE", license, sizeof(license) - 1U},
+        {"install.ps1", installer, sizeof(installer) - 1U},
+        {"THIRD_PARTY_NOTICES.md", notices, sizeof(notices) - 1U},
+    };
+    int zip_length = 0;
+    unsigned char *zip =
+        create_test_zip_entries(entries, sizeof(entries) / sizeof(entries[0]), &zip_length);
+    ASSERT_NOT_NULL(zip);
+    cbm_windows_release_pair_t pair;
+    ASSERT_TRUE(cbm_extract_windows_release_pair_from_zip(zip, zip_length, &pair));
+    ASSERT_EQ(pair.launcher_len, 11);
+    ASSERT_EQ(pair.payload_len, 10);
+    ASSERT_MEM_EQ(pair.launcher, "MZ-launcher", 11);
+    ASSERT_MEM_EQ(pair.payload, "MZ-payload", 10);
+    cbm_windows_release_pair_free(&pair);
+    free(zip);
+    PASS();
+}
+
+TEST(cli_extract_windows_release_pair_rejects_unknown_release_member) {
+    static const unsigned char content[] = "x";
+    const test_zip_entry_t entries[] = {
+        {"codebase-memory-mcp.exe", content, sizeof(content) - 1U},
+        {"codebase-memory-mcp.payload.exe", content, sizeof(content) - 1U},
+        {"LICENSE", content, sizeof(content) - 1U},
+        {"install.ps1", content, sizeof(content) - 1U},
+        {"unexpected.dll", content, sizeof(content) - 1U},
+    };
+    int zip_length = 0;
+    unsigned char *zip =
+        create_test_zip_entries(entries, sizeof(entries) / sizeof(entries[0]), &zip_length);
+    ASSERT_NOT_NULL(zip);
+    cbm_windows_release_pair_t pair;
+    ASSERT_FALSE(cbm_extract_windows_release_pair_from_zip(zip, zip_length, &pair));
+    cbm_windows_release_pair_free(&pair);
+    free(zip);
+    PASS();
+}
+
+TEST(cli_extract_windows_release_pair_rejects_aliases_and_duplicates) {
+    static const struct {
+        const char *launcher;
+        const char *payload;
+    } attacks[] = {
+        {
+            "CODEBASE-MEMORY-MCP.EXE",
+            "codebase-memory-mcp.payload.exe",
+        },
+        {
+            "codebase-memory-mcp.exe",
+            "codebase-memory-mcp.exe",
+        },
+        {
+            ".\\codebase-memory-mcp.exe",
+            "codebase-memory-mcp.payload.exe",
+        },
+        {
+            "codebase-memory-mcp.exe.",
+            "codebase-memory-mcp.payload.exe",
+        },
+        {
+            "codebase-memory-mcp.exe",
+            "codebase-memory-mcp.payload.exe ",
+        },
+    };
+    for (size_t index = 0; index < sizeof(attacks) / sizeof(attacks[0]); index++) {
+        int zip_length = 0;
+        unsigned char *zip = create_test_windows_release_zip(attacks[index].launcher,
+                                                             attacks[index].payload, &zip_length);
+        ASSERT_NOT_NULL(zip);
+        cbm_windows_release_pair_t pair;
+        ASSERT_FALSE(cbm_extract_windows_release_pair_from_zip(zip, zip_length, &pair));
+        cbm_windows_release_pair_free(&pair);
+        free(zip);
+    }
+    PASS();
+}
+
+TEST(cli_extract_windows_release_pair_rejects_local_central_mismatch) {
+    int zip_length = 0;
+    unsigned char *zip = create_test_windows_release_zip(
+        "codebase-memory-mcp.exe", "codebase-memory-mcp.payload.exe", &zip_length);
+    ASSERT_NOT_NULL(zip);
+    /* Local name starts at offset 30; central metadata remains unchanged. */
+    zip[30] = 'x';
+    cbm_windows_release_pair_t pair;
+    ASSERT_FALSE(cbm_extract_windows_release_pair_from_zip(zip, zip_length, &pair));
+    cbm_windows_release_pair_free(&pair);
+    free(zip);
+    PASS();
+}
+
 TEST(cli_extract_binary_from_zip) {
     const char *content = "#!/bin/sh\necho test\n";
     int zip_len = 0;
@@ -3546,8 +3764,7 @@ TEST(cli_agent_uninstall_reports_safe_editor_refusal) {
     snprintf(bin_dir, sizeof(bin_dir), "%s/.local/bin", tmpdir);
     test_mkdirp(bin_dir);
 #ifdef _WIN32
-    snprintf(bin_path, sizeof(bin_path), "%s/codebase-memory-mcp.exe",
-             bin_dir);
+    snprintf(bin_path, sizeof(bin_path), "%s/codebase-memory-mcp.exe", bin_dir);
 #else
     snprintf(bin_path, sizeof(bin_path), "%s/codebase-memory-mcp", bin_dir);
 #endif
@@ -3575,10 +3792,8 @@ TEST(cli_agent_uninstall_reports_safe_editor_refusal) {
     restore_test_env("HOME", saved_home);
     restore_test_env("PATH", saved_path);
     test_rmdir_r(tmpdir);
-    if (rc == 0 || !preserved || !binary_preserved ||
-        fake.mutation_reserve_count != 1 ||
-        fake.mutation_lease_release_count != 1 ||
-        !strstr(fake.diagnostic, "executable was kept"))
+    if (rc == 0 || !preserved || !binary_preserved || fake.mutation_reserve_count != 1 ||
+        fake.mutation_lease_release_count != 1 || !strstr(fake.diagnostic, "executable was kept"))
         FAIL("agent uninstall refusal must fail before removing the live binary");
     PASS();
 }
@@ -10760,29 +10975,24 @@ static void *cli_config_read_with_handoff(void *opaque) {
         const char *value = cbm_config_get(read->config, read->key, NULL);
         read->storage_address = (uintptr_t)value;
         atomic_store_explicit(read->phase, 1, memory_order_release);
-        for (int spins = 0; spins < 5000 &&
-                            atomic_load_explicit(read->phase, memory_order_acquire) < 2;
-             spins++) {
+        for (int spins = 0;
+             spins < 5000 && atomic_load_explicit(read->phase, memory_order_acquire) < 2; spins++) {
             cbm_usleep(1000);
         }
-        read->completed_handoff =
-            atomic_load_explicit(read->phase, memory_order_acquire) == 2;
+        read->completed_handoff = atomic_load_explicit(read->phase, memory_order_acquire) == 2;
         read->value_preserved =
             read->completed_handoff && value && strcmp(value, read->expected) == 0;
         return NULL;
     }
 
-    for (int spins = 0; spins < 5000 &&
-                        atomic_load_explicit(read->phase, memory_order_acquire) < 1;
+    for (int spins = 0; spins < 5000 && atomic_load_explicit(read->phase, memory_order_acquire) < 1;
          spins++) {
         cbm_usleep(1000);
     }
-    read->completed_handoff =
-        atomic_load_explicit(read->phase, memory_order_acquire) == 1;
+    read->completed_handoff = atomic_load_explicit(read->phase, memory_order_acquire) == 1;
     const char *value = cbm_config_get(read->config, read->key, NULL);
     read->storage_address = (uintptr_t)value;
-    read->value_preserved =
-        read->completed_handoff && value && strcmp(value, read->expected) == 0;
+    read->value_preserved = read->completed_handoff && value && strcmp(value, read->expected) == 0;
     atomic_store_explicit(read->phase, 2, memory_order_release);
     return NULL;
 }
@@ -10805,18 +11015,12 @@ TEST(cli_config_get_result_storage_is_per_thread) {
     atomic_int phase;
     atomic_init(&phase, 0);
     cli_config_read_thread_t reads[2] = {
-        {.config = cfg,
-         .key = "first",
-         .expected = "alpha",
-         .phase = &phase,
-         .first_reader = true},
+        {.config = cfg, .key = "first", .expected = "alpha", .phase = &phase, .first_reader = true},
         {.config = cfg, .key = "second", .expected = "beta", .phase = &phase},
     };
     cbm_thread_t threads[2];
-    bool started0 =
-        cbm_thread_create(&threads[0], 0, cli_config_read_with_handoff, &reads[0]) == 0;
-    bool started1 =
-        cbm_thread_create(&threads[1], 0, cli_config_read_with_handoff, &reads[1]) == 0;
+    bool started0 = cbm_thread_create(&threads[0], 0, cli_config_read_with_handoff, &reads[0]) == 0;
+    bool started1 = cbm_thread_create(&threads[1], 0, cli_config_read_with_handoff, &reads[1]) == 0;
     if (started0) {
         (void)cbm_thread_join(&threads[0]);
     }
@@ -10824,8 +11028,7 @@ TEST(cli_config_get_result_storage_is_per_thread) {
         (void)cbm_thread_join(&threads[1]);
     }
 
-    bool separate_storage = reads[0].storage_address != 0 &&
-                            reads[1].storage_address != 0 &&
+    bool separate_storage = reads[0].storage_address != 0 && reads[1].storage_address != 0 &&
                             reads[0].storage_address != reads[1].storage_address;
     cbm_config_close(cfg);
     test_rmdir_r(tmpdir);
@@ -11153,8 +11356,7 @@ static int sha256_vector_ok(const void *content, size_t len, const char *expecte
 }
 
 static bool cli_checksum_manifest_path(char *path, size_t path_size) {
-    int written = snprintf(path, path_size, "%s/cbm-checksum-XXXXXX",
-                           cbm_tmpdir());
+    int written = snprintf(path, path_size, "%s/cbm-checksum-XXXXXX", cbm_tmpdir());
     if (written <= 0 || (size_t)written >= path_size) {
         return false;
     }
@@ -11186,15 +11388,13 @@ TEST(cli_checksum_manifest_requires_exact_filename_and_accepts_star) {
     char path[512];
     ASSERT_TRUE(cli_checksum_manifest_path(path, sizeof(path)));
     char manifest[1024];
-    ASSERT_TRUE(snprintf(manifest, sizeof(manifest),
-                         "%s  prefix-%s\n%s *%s\n%s  %s\n",
-                         other_digest, artifact, upper_digest, artifact,
-                         lower_digest, artifact) > 0);
+    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  prefix-%s\n%s *%s\n%s  %s\n",
+                         other_digest, artifact, upper_digest, artifact, lower_digest,
+                         artifact) > 0);
     ASSERT_EQ(write_test_file(path, manifest), 0);
 
     char parsed[65] = {0};
-    int status = cbm_cli_checksum_manifest_digest(
-        path, artifact, parsed, sizeof(parsed));
+    int status = cbm_cli_checksum_manifest_digest(path, artifact, parsed, sizeof(parsed));
     (void)cbm_unlink(path);
 
     ASSERT_EQ(status, 0);
@@ -11215,33 +11415,24 @@ TEST(cli_checksum_manifest_rejects_invalid_missing_and_conflicting_digest) {
     char manifest[1024];
     char parsed[65] = {0};
 
-    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  prefix-%s\n",
-                         digest_a, artifact) > 0);
+    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  prefix-%s\n", digest_a, artifact) > 0);
     ASSERT_EQ(write_test_file(path, manifest), 0);
-    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(
-                   path, artifact, parsed, sizeof(parsed)),
-               0);
+    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(path, artifact, parsed, sizeof(parsed)), 0);
 
-    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  %s\n",
-                         invalid_digest, artifact) > 0);
+    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  %s\n", invalid_digest, artifact) > 0);
     ASSERT_EQ(write_test_file(path, manifest), 0);
-    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(
-                   path, artifact, parsed, sizeof(parsed)),
-               0);
+    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(path, artifact, parsed, sizeof(parsed)), 0);
 
-    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  %s\n%s *%s\n",
-                         digest_a, artifact, digest_b, artifact) > 0);
+    ASSERT_TRUE(snprintf(manifest, sizeof(manifest), "%s  %s\n%s *%s\n", digest_a, artifact,
+                         digest_b, artifact) > 0);
     ASSERT_EQ(write_test_file(path, manifest), 0);
-    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(
-                   path, artifact, parsed, sizeof(parsed)),
-               0);
+    ASSERT_NEQ(cbm_cli_checksum_manifest_digest(path, artifact, parsed, sizeof(parsed)), 0);
     (void)cbm_unlink(path);
     PASS();
 }
 
 TEST(cli_checksum_manifest_rejects_oversized_input) {
-    static const char digest[] =
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    static const char digest[] = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const char *artifact = "codebase-memory-mcp-windows-amd64.zip";
     char path[512];
     ASSERT_TRUE(cli_checksum_manifest_path(path, sizeof(path)));
@@ -11251,14 +11442,12 @@ TEST(cli_checksum_manifest_rejects_oversized_input) {
     unsigned char padding[1024];
     memset(padding, 'x', sizeof(padding));
     for (int i = 0; i < 65; i++) {
-        ASSERT_EQ(fwrite(padding, 1, sizeof(padding), manifest),
-                  sizeof(padding));
+        ASSERT_EQ(fwrite(padding, 1, sizeof(padding), manifest), sizeof(padding));
     }
     ASSERT_EQ(fclose(manifest), 0);
 
     char parsed[65] = {0};
-    int status = cbm_cli_checksum_manifest_digest(
-        path, artifact, parsed, sizeof(parsed));
+    int status = cbm_cli_checksum_manifest_digest(path, artifact, parsed, sizeof(parsed));
     (void)cbm_unlink(path);
 
     ASSERT_NEQ(status, 0);
@@ -11285,6 +11474,7 @@ TEST(cli_sha256_file_matches_known_vector) {
 SUITE(cli) {
     RUN_TEST(cli_progress_visibility_policy);
     RUN_TEST(cli_raw_mcp_result_preserves_tool_error_status);
+    RUN_TEST(cli_maintenance_cancellation_forces_failure_status);
     RUN_TEST(cli_progress_sink_accepts_worker_json_logs);
     RUN_TEST(cli_progress_sink_serializes_concurrent_callbacks);
     RUN_TEST(cli_sha256_file_matches_known_vector);
@@ -11388,6 +11578,11 @@ SUITE(cli) {
     RUN_TEST(cli_extract_binary_from_targz_not_found);
     RUN_TEST(cli_extract_binary_from_targz_invalid_data);
     RUN_TEST(cli_extract_binary_from_zip);
+    RUN_TEST(cli_extract_windows_release_pair_rejects_incomplete_release_namespace);
+    RUN_TEST(cli_extract_windows_release_pair_accepts_official_release_namespace);
+    RUN_TEST(cli_extract_windows_release_pair_rejects_unknown_release_member);
+    RUN_TEST(cli_extract_windows_release_pair_rejects_aliases_and_duplicates);
+    RUN_TEST(cli_extract_windows_release_pair_rejects_local_central_mismatch);
     RUN_TEST(cli_extract_binary_from_zip_not_found);
     RUN_TEST(cli_extract_binary_from_zip_path_traversal);
     RUN_TEST(cli_extract_binary_from_zip_invalid);

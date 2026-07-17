@@ -159,19 +159,17 @@ const char *cbm_mcp_server_allowed_root(const cbm_mcp_server_t *srv);
  * coordinator owns background work. */
 void cbm_mcp_server_set_background_tasks(cbm_mcp_server_t *srv, bool enabled);
 
-void cbm_mcp_server_set_index_executor(cbm_mcp_server_t *srv,
-                                       cbm_mcp_index_executor_fn executor,
+void cbm_mcp_server_set_index_executor(cbm_mcp_server_t *srv, cbm_mcp_index_executor_fn executor,
                                        void *context);
 
 /* Relay supervised worker logs to one local request (for CLI progress). The
  * callback/context are borrowed until the synchronous tool call returns. */
-void cbm_mcp_server_set_index_log_callback(cbm_mcp_server_t *srv,
-                                           cbm_proc_log_cb callback,
+void cbm_mcp_server_set_index_log_callback(cbm_mcp_server_t *srv, cbm_proc_log_cb callback,
                                            void *context);
 
-void cbm_mcp_server_set_project_mutation_guard(
-    cbm_mcp_server_t *srv, cbm_mcp_project_mutation_begin_fn begin,
-    cbm_mcp_project_mutation_end_fn end, void *context);
+void cbm_mcp_server_set_project_mutation_guard(cbm_mcp_server_t *srv,
+                                               cbm_mcp_project_mutation_begin_fn begin,
+                                               cbm_mcp_project_mutation_end_fn end, void *context);
 
 /* Read one complete MCP message from in. Supports newline-delimited JSON and
  * Content-Length framing, including additional headers. Returns 1 on success,
@@ -248,10 +246,17 @@ struct cbm_pipeline; /* forward decl */
  * Returns NULL if no pipeline is running. */
 struct cbm_pipeline *cbm_mcp_server_active_pipeline(cbm_mcp_server_t *srv);
 
-/* Thread-safe cancellation for daemon connection teardown. The active
- * pipeline pointer is protected until cbm_pipeline_cancel() has recorded its
- * atomic request, so the request thread cannot clear/free it concurrently. */
+/* Thread-safe cancellation for daemon connection teardown. Returns false when
+ * no request scope is active. Long-running request operations share the atomic
+ * cancellation token and own any process-tree teardown before returning. */
 bool cbm_mcp_server_cancel_active(cbm_mcp_server_t *srv);
+
+/* Publish an outer request lifetime before crossing an asynchronous transport
+ * boundary. The daemon application uses this to close the short interval
+ * between accepting a request token and entering JSON-RPC/tool dispatch. Each
+ * successful begin must be paired with end. */
+bool cbm_mcp_server_request_scope_begin(cbm_mcp_server_t *srv);
+void cbm_mcp_server_request_scope_end(cbm_mcp_server_t *srv);
 
 /* ── URI helpers ───────────────────────────────────────────────── */
 

@@ -35,10 +35,8 @@ TEST(checkpoint_does_not_truncate_wal) {
     ASSERT(s != NULL);
 
     /* Grow WAL beyond zero bytes via direct SQL. */
-    int rc_sql = cbm_store_exec(
-        s,
-        "INSERT OR IGNORE INTO projects(name, indexed_at, root_path) "
-        "VALUES('p', '2026-01-01', '/tmp/p');");
+    int rc_sql = cbm_store_exec(s, "INSERT OR IGNORE INTO projects(name, indexed_at, root_path) "
+                                   "VALUES('p', '2026-01-01', '/tmp/p');");
     ASSERT_EQ(rc_sql, 0);
     for (int i = 0; i < N_ROWS; i++) {
         char sql[256];
@@ -73,7 +71,6 @@ TEST(checkpoint_does_not_truncate_wal) {
     unlink(shm_path);
     PASS();
 }
-
 
 /* #897: any code path installing a fresh DB file must delete the
  * destination's -wal/-shm first. SQLite decides whether to replay a WAL

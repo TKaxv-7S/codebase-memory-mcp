@@ -6,7 +6,6 @@
 #include "daemon/application.h"
 #include "foundation/compat.h"
 #include "foundation/compat_thread.h"
-#include "foundation/log.h"
 #include "foundation/platform.h"
 #include "foundation/subprocess.h"
 #include "mcp/mcp.h"
@@ -23,14 +22,23 @@ enum {
     FRONTEND_QUEUE_BYTES_MAX = 12 * 1024 * 1024,
     FRONTEND_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000,
     FRONTEND_CLOSE_TIMEOUT_MS = 5000,
+    FRONTEND_JOIN_WATCHDOG_MS = FRONTEND_CLOSE_TIMEOUT_MS,
+    /* A regular-file/buffered client can write several complete requests and
+     * close stdin before the worker is scheduled. Give already-accepted input
+     * a short FIFO drain window so EOF cannot silently discard it. A genuinely
+     * active long operation is still cancelled at this deadline. */
+    FRONTEND_EOF_DRAIN_MS = 1000,
     FRONTEND_WAIT_US = 1000,
+    /* An idle thin frontend owns no work and only needs to notice the next
+     * queue item promptly. Ten milliseconds avoids a 1 kHz wake-up loop per
+     * connected coding-agent session without perceptible request latency. */
+    FRONTEND_IDLE_WAIT_US = 10 * 1000,
     FRONTEND_MAINTENANCE_POLL_MS = 10,
     /* The owner thread may be draining a supervised process tree. Preserve the
      * supervisor's complete graceful + forced-settle window before the monitor
      * fail-stops the process, plus scheduling/teardown margin. */
     FRONTEND_MAINTENANCE_GRACE_MS =
-        CBM_SUBPROCESS_MAX_CANCEL_GRACE_MS +
-        CBM_SUBPROCESS_FORCE_SETTLE_MS + 1000,
+        CBM_SUBPROCESS_MAX_CANCEL_GRACE_MS + CBM_SUBPROCESS_FORCE_SETTLE_MS + 1000,
     FRONTEND_PARTICIPANT_NAME_CAP = 64,
 };
 
@@ -54,7 +62,9 @@ typedef struct {
     size_t head;
     size_t count;
     size_t queued_bytes;
+    bool input_closed;
     bool stopping;
+    bool worker_done;
     bool in_request;
     bool active_has_id;
     int64_t active_id;
@@ -62,6 +72,10 @@ typedef struct {
     cbm_daemon_runtime_application_token_t active_request_token;
     bool failed;
 } frontend_state_t;
+
+typedef struct {
+    atomic_bool complete;
+} frontend_join_watchdog_t;
 
 struct cbm_daemon_maintenance_monitor {
     cbm_thread_t thread;
@@ -73,96 +87,55 @@ struct cbm_daemon_maintenance_monitor {
     char participant[FRONTEND_PARTICIPANT_NAME_CAP];
 };
 
-static void frontend_flush_process_outputs(FILE *out) {
-    if (out) {
-        (void)fflush(out);
-    }
-    (void)fflush(stderr);
-}
-
-static const char *frontend_maintenance_reason(
-    cbm_version_cohort_maintenance_presence_t presence) {
-    switch (presence) {
-        case CBM_VERSION_COHORT_MAINTENANCE_REQUESTED:
-            return "requested";
-        case CBM_VERSION_COHORT_MAINTENANCE_UNSAFE:
-            return "unsafe";
-        case CBM_VERSION_COHORT_MAINTENANCE_IO:
-            return "io";
-        case CBM_VERSION_COHORT_MAINTENANCE_ABSENT:
-        default:
-            return "absent";
-    }
-}
-
 static void *frontend_maintenance_monitor_worker(void *opaque) {
     cbm_daemon_maintenance_monitor_t *monitor = opaque;
-    while (!atomic_load_explicit(&monitor->stopping,
-                                 memory_order_acquire)) {
+    while (!atomic_load_explicit(&monitor->stopping, memory_order_acquire)) {
         cbm_version_cohort_maintenance_presence_t presence =
-            cbm_version_cohort_maintenance_presence(monitor->manager);
+            cbm_version_cohort_maintenance_presence_terminal(monitor->manager);
         if (presence == CBM_VERSION_COHORT_MAINTENANCE_ABSENT) {
             cbm_usleep(FRONTEND_MAINTENANCE_POLL_MS * 1000U);
             continue;
         }
 
         if (presence == CBM_VERSION_COHORT_MAINTENANCE_REQUESTED) {
-            bool cancellation_requested =
-                monitor->cancel && monitor->cancel(monitor->cancel_context);
-            cbm_log_info("participant.maintenance_requested", "participant",
-                         monitor->participant, "cooperative_cancel",
-                         cancellation_requested ? "requested" : "not_active");
-            (void)fprintf(
-                stderr,
-                "codebase-memory-mcp: active %s is stopping for install/update/uninstall\n",
-                monitor->participant);
-            frontend_flush_process_outputs(stdout);
+            if (monitor->cancel) {
+                (void)monitor->cancel(monitor->cancel_context);
+            }
+            /* Never log, write to, or flush agent stdio from this monitor.
+             * Structured logging itself writes to stderr, and this thread's
+             * reason for existing is to remain runnable when another frontend
+             * thread is blocked on a full stdout/stderr pipe. The activation
+             * owner records the maintenance event durably. */
 
             uint64_t now = cbm_now_ms();
-            uint64_t deadline =
-                now > UINT64_MAX - FRONTEND_MAINTENANCE_GRACE_MS
-                    ? UINT64_MAX
-                    : now + FRONTEND_MAINTENANCE_GRACE_MS;
-            while (!atomic_load_explicit(&monitor->stopping,
-                                         memory_order_acquire) &&
+            uint64_t deadline = now > UINT64_MAX - FRONTEND_MAINTENANCE_GRACE_MS
+                                    ? UINT64_MAX
+                                    : now + FRONTEND_MAINTENANCE_GRACE_MS;
+            while (!atomic_load_explicit(&monitor->stopping, memory_order_acquire) &&
                    cbm_now_ms() < deadline) {
                 cbm_usleep(FRONTEND_MAINTENANCE_POLL_MS * 1000U);
             }
-            if (atomic_load_explicit(&monitor->stopping,
-                                     memory_order_acquire)) {
+            if (atomic_load_explicit(&monitor->stopping, memory_order_acquire)) {
                 return NULL;
             }
-            cbm_log_info("participant.maintenance_forced_exit", "participant",
-                         monitor->participant, "action", "process_exit");
-            frontend_flush_process_outputs(stdout);
             _Exit(monitor->exit_code);
         }
 
         /* An observer that cannot prove absence must not let local work
          * survive into a binary mutation window. Fail closed and let native
          * process teardown release SQLite and cohort ownership. */
-        cbm_log_error("participant.maintenance_observation_failed",
-                      "participant", monitor->participant, "reason",
-                      frontend_maintenance_reason(presence));
-        (void)fprintf(
-            stderr,
-            "codebase-memory-mcp: %s stopped because maintenance coordination could not be verified\n",
-            monitor->participant);
-        frontend_flush_process_outputs(stdout);
         _Exit(EXIT_FAILURE);
     }
     return NULL;
 }
 
 cbm_daemon_maintenance_monitor_t *cbm_daemon_maintenance_monitor_start(
-    cbm_version_cohort_manager_t *manager,
-    cbm_daemon_maintenance_cancel_fn cancel, void *cancel_context,
-    int exit_code, const char *participant) {
+    cbm_version_cohort_manager_t *manager, cbm_daemon_maintenance_cancel_fn cancel,
+    void *cancel_context, int exit_code, const char *participant) {
     if (!manager || exit_code < 0 || !participant || !participant[0]) {
         return NULL;
     }
-    cbm_daemon_maintenance_monitor_t *monitor =
-        calloc(1, sizeof(*monitor));
+    cbm_daemon_maintenance_monitor_t *monitor = calloc(1, sizeof(*monitor));
     if (!monitor) {
         return NULL;
     }
@@ -171,20 +144,16 @@ cbm_daemon_maintenance_monitor_t *cbm_daemon_maintenance_monitor_start(
     monitor->cancel_context = cancel_context;
     monitor->exit_code = exit_code;
     atomic_init(&monitor->stopping, false);
-    int written = snprintf(monitor->participant,
-                           sizeof(monitor->participant), "%s", participant);
+    int written = snprintf(monitor->participant, sizeof(monitor->participant), "%s", participant);
     if (written <= 0 || written >= (int)sizeof(monitor->participant) ||
-        cbm_thread_create(&monitor->thread, 0,
-                          frontend_maintenance_monitor_worker,
-                          monitor) != 0) {
+        cbm_thread_create(&monitor->thread, 0, frontend_maintenance_monitor_worker, monitor) != 0) {
         free(monitor);
         return NULL;
     }
     return monitor;
 }
 
-bool cbm_daemon_maintenance_monitor_stop(
-    cbm_daemon_maintenance_monitor_t **monitor_io) {
+bool cbm_daemon_maintenance_monitor_stop(cbm_daemon_maintenance_monitor_t **monitor_io) {
     if (!monitor_io || !*monitor_io) {
         return false;
     }
@@ -200,27 +169,15 @@ bool cbm_daemon_maintenance_monitor_stop(
 
 static void frontend_exit_for_maintenance(frontend_state_t *state) {
     cbm_version_cohort_maintenance_presence_t presence =
-        cbm_version_cohort_maintenance_presence(state->cohort_manager);
+        cbm_version_cohort_maintenance_presence_terminal(state->cohort_manager);
     if (presence == CBM_VERSION_COHORT_MAINTENANCE_ABSENT) {
         return;
     }
-    bool requested =
-        presence == CBM_VERSION_COHORT_MAINTENANCE_REQUESTED;
-    if (requested) {
-        cbm_log_info("daemon.frontend.maintenance_requested", "action",
-                     "exit_thin_frontend");
-        (void)fputs(
-            "codebase-memory-mcp: MCP session is stopping for install/update/uninstall; restart the coding-agent session afterwards\n",
-            stderr);
-    } else {
-        cbm_log_error("daemon.frontend.maintenance_observation_failed",
-                      "reason", frontend_maintenance_reason(presence),
-                      "action", "exit_thin_frontend");
-    }
     /* Do not fclose stdin across threads. Process exit closes the authenticated
-     * kernel IPC handle, and daemon ownership then cancels only this session. */
-    frontend_flush_process_outputs(state->out);
-    _Exit(requested ? EXIT_SUCCESS : EXIT_FAILURE);
+     * kernel IPC handle, and daemon ownership then cancels only this session.
+     * Agent stdout/stderr may both be backpressured, so terminal paths must not
+     * log, write, or flush before fail-stop. */
+    _Exit(presence == CBM_VERSION_COHORT_MAINTENANCE_REQUESTED ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 static void frontend_item_free(frontend_item_t *item) {
@@ -233,25 +190,61 @@ static void frontend_item_free(frontend_item_t *item) {
 
 static bool frontend_should_stop(frontend_state_t *state) {
     cbm_mutex_lock(&state->mutex);
-    bool stopping = state->stopping;
+    bool stopping = state->stopping || (state->input_closed && state->count == 0);
     cbm_mutex_unlock(&state->mutex);
     return stopping;
+}
+
+static void frontend_worker_mark_done(frontend_state_t *state) {
+    cbm_mutex_lock(&state->mutex);
+    state->worker_done = true;
+    cbm_mutex_unlock(&state->mutex);
+}
+
+static bool frontend_worker_is_done(frontend_state_t *state) {
+    cbm_mutex_lock(&state->mutex);
+    bool done = state->worker_done;
+    cbm_mutex_unlock(&state->mutex);
+    return done;
+}
+
+static void frontend_input_closed(frontend_state_t *state) {
+    cbm_mutex_lock(&state->mutex);
+    state->input_closed = true;
+    cbm_mutex_unlock(&state->mutex);
+}
+
+static void *frontend_join_watchdog(void *opaque) {
+    frontend_join_watchdog_t *watchdog = opaque;
+    uint64_t now = cbm_now_ms();
+    uint64_t deadline =
+        now > UINT64_MAX - FRONTEND_JOIN_WATCHDOG_MS ? UINT64_MAX : now + FRONTEND_JOIN_WATCHDOG_MS;
+    while (!atomic_load_explicit(&watchdog->complete, memory_order_acquire) &&
+           cbm_now_ms() < deadline) {
+        cbm_usleep(FRONTEND_WAIT_US);
+    }
+    if (!atomic_load_explicit(&watchdog->complete, memory_order_acquire)) {
+        /* A thin frontend owns no durable state. If stdout is backpressured,
+         * fclose/IPC cancellation cannot portably wake its worker on every
+         * platform. Fail-stop releases the authenticated connection and lets
+         * the daemon cancel this exact session instead of hanging forever. */
+        _Exit(EXIT_FAILURE);
+    }
+    return NULL;
 }
 
 /* Pop and publish the active request identity under one mutex acquisition, so
  * a cancellation reader can never observe the item as neither queued nor
  * active. */
-static bool frontend_pop_begin(frontend_state_t *state,
-                               frontend_item_t *item) {
+static bool frontend_pop_begin(frontend_state_t *state, frontend_item_t *item) {
     bool popped = false;
     cbm_mutex_lock(&state->mutex);
     if (!state->stopping && state->count > 0) {
         frontend_item_t *queued = &state->queue[state->head];
         cbm_daemon_runtime_application_token_t request_token =
             CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID;
-        bool token_ready = queued->cancelled ||
-                           cbm_daemon_runtime_client_application_token_reserve(
-                               state->client, &request_token);
+        bool token_ready = queued->cancelled || cbm_daemon_runtime_client_application_token_reserve(
+                                                    state->client, &request_token);
         if (!token_ready) {
             state->failed = true;
             state->stopping = true;
@@ -281,31 +274,26 @@ static void frontend_end_request(frontend_state_t *state, bool failed) {
     state->active_has_id = false;
     state->active_id = 0;
     state->active_id_str = NULL;
-    state->active_request_token =
-        CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID;
+    state->active_request_token = CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID;
     state->failed = state->failed || failed;
     cbm_mutex_unlock(&state->mutex);
 }
 
-static bool frontend_write_response(FILE *out, const uint8_t *response,
-                                    uint32_t response_length,
+static bool frontend_write_response(FILE *out, const uint8_t *response, uint32_t response_length,
                                     bool content_length_framed) {
     bool written = false;
     if (content_length_framed) {
-        written = fprintf(out, "Content-Length: %u\r\n\r\n",
-                          response_length) >= 0 &&
+        written = fprintf(out, "Content-Length: %u\r\n\r\n", response_length) >= 0 &&
                   fwrite(response, 1, response_length, out) == response_length;
     } else {
-        written = fwrite(response, 1, response_length, out) == response_length &&
-                  fputc('\n', out) != EOF;
+        written =
+            fwrite(response, 1, response_length, out) == response_length && fputc('\n', out) != EOF;
     }
     return fflush(out) == 0 && written;
 }
 
-static bool frontend_write_cancelled_response(FILE *out,
-                                              const frontend_item_t *item) {
-    static const char cancelled_error[] =
-        "{\"code\":-32800,\"message\":\"Request cancelled\"}";
+static bool frontend_write_cancelled_response(FILE *out, const frontend_item_t *item) {
+    static const char cancelled_error[] = "{\"code\":-32800,\"message\":\"Request cancelled\"}";
     cbm_jsonrpc_response_t response = {
         .id = item->id,
         .id_str = item->id_str,
@@ -313,17 +301,14 @@ static bool frontend_write_cancelled_response(FILE *out,
         .error_code = -32800,
     };
     char *encoded = cbm_jsonrpc_format_response(&response);
-    bool written = encoded &&
-                   frontend_write_response(
-                       out, (const uint8_t *)encoded,
-                       (uint32_t)strlen(encoded),
-                       item->content_length_framed);
+    bool written =
+        encoded && frontend_write_response(out, (const uint8_t *)encoded, (uint32_t)strlen(encoded),
+                                           item->content_length_framed);
     free(encoded);
     return written;
 }
 
-static bool frontend_parse_cancellation(const char *message,
-                                        cbm_jsonrpc_request_t *request_out) {
+static bool frontend_parse_cancellation(const char *message, cbm_jsonrpc_request_t *request_out) {
     if (!message || !request_out) {
         return false;
     }
@@ -332,8 +317,7 @@ static bool frontend_parse_cancellation(const char *message,
         return false;
     }
     bool cancellation = !request_out->has_id && request_out->method &&
-                        strcmp(request_out->method,
-                               "notifications/cancelled") == 0;
+                        strcmp(request_out->method, "notifications/cancelled") == 0;
     if (!cancellation) {
         cbm_jsonrpc_request_free(request_out);
     }
@@ -349,13 +333,12 @@ bool cbm_daemon_frontend_is_cancellation_notification(const char *message) {
     return cancellation;
 }
 
-bool cbm_daemon_frontend_cancellation_matches_request(
-    const char *message, int64_t active_id, const char *active_id_str) {
+bool cbm_daemon_frontend_cancellation_matches_request(const char *message, int64_t active_id,
+                                                      const char *active_id_str) {
     cbm_jsonrpc_request_t request = {0};
     bool cancellation = frontend_parse_cancellation(message, &request);
     bool matches = cancellation &&
-                   cbm_mcp_cancel_request_matches(
-                       request.params_raw, active_id, active_id_str);
+                   cbm_mcp_cancel_request_matches(request.params_raw, active_id, active_id_str);
     if (cancellation) {
         cbm_jsonrpc_request_free(&request);
     }
@@ -387,22 +370,19 @@ static frontend_cancellation_route_t frontend_route_cancellation(
     frontend_cancellation_route_t route = FRONTEND_CANCELLATION_STALE;
     cbm_mutex_lock(&state->mutex);
     if (state->in_request && state->active_has_id &&
-        state->active_request_token !=
-            CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID &&
-        cbm_mcp_cancel_request_matches(
-            request.params_raw, state->active_id, state->active_id_str)) {
+        state->active_request_token != CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID &&
+        cbm_mcp_cancel_request_matches(request.params_raw, state->active_id,
+                                       state->active_id_str)) {
         if (request_token_out) {
             *request_token_out = state->active_request_token;
         }
         route = FRONTEND_CANCELLATION_ACTIVE;
     } else {
         for (size_t offset = 0; offset < state->count; offset++) {
-            size_t index =
-                (state->head + offset) % FRONTEND_QUEUE_CAPACITY;
+            size_t index = (state->head + offset) % FRONTEND_QUEUE_CAPACITY;
             frontend_item_t *item = &state->queue[index];
             if (item->has_id &&
-                cbm_mcp_cancel_request_matches(
-                    request.params_raw, item->id, item->id_str)) {
+                cbm_mcp_cancel_request_matches(request.params_raw, item->id, item->id_str)) {
                 item->cancelled = true;
                 route = FRONTEND_CANCELLATION_QUEUED;
                 break;
@@ -421,45 +401,37 @@ static void *frontend_worker(void *opaque) {
         uint64_t now_ms = cbm_now_ms();
         if (now_ms >= next_maintenance_check_ms) {
             frontend_exit_for_maintenance(state);
-            next_maintenance_check_ms =
-                now_ms > UINT64_MAX - FRONTEND_MAINTENANCE_POLL_MS
-                    ? UINT64_MAX
-                    : now_ms + FRONTEND_MAINTENANCE_POLL_MS;
+            next_maintenance_check_ms = now_ms > UINT64_MAX - FRONTEND_MAINTENANCE_POLL_MS
+                                            ? UINT64_MAX
+                                            : now_ms + FRONTEND_MAINTENANCE_POLL_MS;
         }
         frontend_item_t item = {0};
         if (!frontend_pop_begin(state, &item)) {
             if (frontend_should_stop(state)) {
                 break;
             }
-            cbm_usleep(FRONTEND_WAIT_US);
+            cbm_usleep(FRONTEND_IDLE_WAIT_US);
             continue;
         }
         uint8_t *response = NULL;
         uint32_t response_length = 0;
-        bool output_failed = false;
         bool failed = false;
         if (item.cancelled) {
-            output_failed =
-                !frontend_write_cancelled_response(state->out, &item);
-            failed = output_failed;
+            failed = !frontend_write_cancelled_response(state->out, &item);
         } else {
             cbm_daemon_runtime_application_status_t status =
-                cbm_daemon_application_client_mcp_tagged(
-                    state->client, item.request_token, item.message, &response,
-                    &response_length, FRONTEND_REQUEST_TIMEOUT_MS);
+                cbm_daemon_application_client_mcp_tagged(state->client, item.request_token,
+                                                         item.message, &response, &response_length,
+                                                         FRONTEND_REQUEST_TIMEOUT_MS);
             if (status == CBM_DAEMON_RUNTIME_APPLICATION_CANCELLED) {
-                output_failed =
-                    !frontend_write_cancelled_response(state->out, &item);
-                failed = output_failed;
+                failed = !frontend_write_cancelled_response(state->out, &item);
             } else {
                 failed = status != CBM_DAEMON_RUNTIME_APPLICATION_OK;
             }
-            if (status == CBM_DAEMON_RUNTIME_APPLICATION_OK && !failed &&
-                response && response_length > 0) {
-                output_failed = !frontend_write_response(
-                    state->out, response, response_length,
-                    item.content_length_framed);
-                failed = output_failed;
+            if (status == CBM_DAEMON_RUNTIME_APPLICATION_OK && !failed && response &&
+                response_length > 0) {
+                failed = !frontend_write_response(state->out, response, response_length,
+                                                  item.content_length_framed);
             }
         }
         free(response);
@@ -472,21 +444,18 @@ static void *frontend_worker(void *opaque) {
                  * stdio portably. This frontend owns no state: immediate
                  * process exit closes the kernel IPC handle, which cancels
                  * daemon session ownership without a detached reader or an
-                * unsafe cross-thread fclose. */
-                cbm_log_error("daemon.frontend.request_failed", "reason",
-                              output_failed ? "output" : "daemon_transport",
-                              "action", "exit_thin_frontend");
-                frontend_flush_process_outputs(state->out);
+                 * unsafe cross-thread fclose. Logging or flushing here could
+                 * itself block on agent-owned stdout/stderr. */
                 _Exit(EXIT_FAILURE);
             }
             break;
         }
     }
+    frontend_worker_mark_done(state);
     return NULL;
 }
 
-static bool frontend_enqueue(frontend_state_t *state, char *message,
-                             bool content_length_framed) {
+static bool frontend_enqueue(frontend_state_t *state, char *message, bool content_length_framed) {
     size_t length = strlen(message);
     bool has_id = false;
     int64_t id = 0;
@@ -504,34 +473,33 @@ static bool frontend_enqueue(frontend_state_t *state, char *message,
             return false;
         }
     }
-    for (;;) {
-        cbm_mutex_lock(&state->mutex);
-        bool stopped = state->stopping || state->failed;
-        bool capacity = state->count < FRONTEND_QUEUE_CAPACITY &&
-                        (state->count == 0 ||
-                         state->queued_bytes + length <= FRONTEND_QUEUE_BYTES_MAX);
-        if (!stopped && capacity) {
-            size_t tail = (state->head + state->count) % FRONTEND_QUEUE_CAPACITY;
-            state->queue[tail] = (frontend_item_t){
-                .message = message,
-                .length = length,
-                .content_length_framed = content_length_framed,
-                .has_id = has_id,
-                .id = id,
-                .id_str = id_str,
-            };
-            state->count++;
-            state->queued_bytes += length;
-            cbm_mutex_unlock(&state->mutex);
-            return true;
-        }
+    cbm_mutex_lock(&state->mutex);
+    bool stopped = state->stopping || state->failed;
+    bool capacity = state->count < FRONTEND_QUEUE_CAPACITY &&
+                    state->queued_bytes <= FRONTEND_QUEUE_BYTES_MAX &&
+                    length <= FRONTEND_QUEUE_BYTES_MAX - state->queued_bytes;
+    if (!stopped && capacity) {
+        size_t tail = (state->head + state->count) % FRONTEND_QUEUE_CAPACITY;
+        state->queue[tail] = (frontend_item_t){
+            .message = message,
+            .length = length,
+            .content_length_framed = content_length_framed,
+            .has_id = has_id,
+            .id = id,
+            .id_str = id_str,
+        };
+        state->count++;
+        state->queued_bytes += length;
         cbm_mutex_unlock(&state->mutex);
-        if (stopped) {
-            free(id_str);
-            return false;
-        }
-        cbm_usleep(FRONTEND_WAIT_US);
+        return true;
     }
+    if (!stopped) {
+        state->failed = true;
+        state->stopping = true;
+    }
+    cbm_mutex_unlock(&state->mutex);
+    free(id_str);
+    return false;
 }
 
 static bool frontend_stop_begin(frontend_state_t *state) {
@@ -544,9 +512,25 @@ static bool frontend_stop_begin(frontend_state_t *state) {
     return cbm_daemon_runtime_client_close_begin(state->client);
 }
 
-int cbm_daemon_frontend_mcp_run(
-    cbm_daemon_runtime_client_t *client,
-    cbm_version_cohort_manager_t *cohort_manager, FILE *in, FILE *out) {
+static bool frontend_cancel_for_maintenance(void *opaque) {
+    frontend_state_t *state = opaque;
+    cbm_daemon_runtime_application_token_t request_token =
+        CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID;
+    cbm_mutex_lock(&state->mutex);
+    state->stopping = true;
+    if (state->in_request) {
+        request_token = state->active_request_token;
+    }
+    cbm_mutex_unlock(&state->mutex);
+    if (request_token == CBM_DAEMON_RUNTIME_APPLICATION_TOKEN_INVALID) {
+        return false;
+    }
+    return cbm_daemon_runtime_client_application_cancel(state->client, request_token) ==
+           CBM_DAEMON_RUNTIME_CANCEL_ACCEPTED;
+}
+
+int cbm_daemon_frontend_mcp_run(cbm_daemon_runtime_client_t *client,
+                                cbm_version_cohort_manager_t *cohort_manager, FILE *in, FILE *out) {
     if (!client || !cohort_manager || !in || !out) {
         return -1;
     }
@@ -556,23 +540,33 @@ int cbm_daemon_frontend_mcp_run(
         .out = out,
     };
     cbm_mutex_init(&state.mutex);
+    cbm_daemon_maintenance_monitor_t *maintenance_monitor = cbm_daemon_maintenance_monitor_start(
+        cohort_manager, frontend_cancel_for_maintenance, &state, EXIT_SUCCESS, "MCP frontend");
+    if (!maintenance_monitor) {
+        cbm_mutex_destroy(&state.mutex);
+        (void)cbm_daemon_runtime_client_close(client, FRONTEND_CLOSE_TIMEOUT_MS);
+        return -1;
+    }
     cbm_thread_t worker;
     if (cbm_thread_create(&worker, 0, frontend_worker, &state) != 0) {
+        if (!cbm_daemon_maintenance_monitor_stop(&maintenance_monitor)) {
+            _Exit(EXIT_FAILURE);
+        }
         cbm_mutex_destroy(&state.mutex);
-        (void)cbm_daemon_runtime_client_close(client,
-                                              FRONTEND_CLOSE_TIMEOUT_MS);
+        (void)cbm_daemon_runtime_client_close(client, FRONTEND_CLOSE_TIMEOUT_MS);
         return -1;
     }
 
     int result = 0;
     bool close_begun = false;
+    bool clean_eof = false;
     for (;;) {
         char *message = NULL;
         bool content_length_framed = false;
-        int read_status =
-            cbm_mcp_read_message(in, &message, &content_length_framed);
+        int read_status = cbm_mcp_read_message(in, &message, &content_length_framed);
         if (read_status <= 0) {
             result = read_status < 0 ? -1 : 0;
+            clean_eof = read_status == 0;
             free(message);
             break;
         }
@@ -584,8 +578,7 @@ int cbm_daemon_frontend_mcp_run(
             free(message);
             if (cancellation == FRONTEND_CANCELLATION_ACTIVE) {
                 cbm_daemon_runtime_cancel_result_t cancelled =
-                    cbm_daemon_runtime_client_application_cancel(
-                        state.client, cancel_token);
+                    cbm_daemon_runtime_client_application_cancel(state.client, cancel_token);
                 if (cancelled == CBM_DAEMON_RUNTIME_CANCEL_ERROR) {
                     result = -1;
                     close_begun = frontend_stop_begin(&state);
@@ -603,13 +596,43 @@ int cbm_daemon_frontend_mcp_run(
         }
     }
 
+    if (clean_eof && !close_begun) {
+        frontend_input_closed(&state);
+        uint64_t now = cbm_now_ms();
+        uint64_t drain_deadline =
+            now > UINT64_MAX - FRONTEND_EOF_DRAIN_MS ? UINT64_MAX : now + FRONTEND_EOF_DRAIN_MS;
+        while (!frontend_worker_is_done(&state) && cbm_now_ms() < drain_deadline) {
+            cbm_usleep(FRONTEND_WAIT_US);
+        }
+    }
     if (!close_begun) {
         close_begun = frontend_stop_begin(&state);
     }
-    (void)cbm_thread_join(&worker);
+    frontend_join_watchdog_t watchdog;
+    cbm_thread_t watchdog_thread;
+    bool watchdog_started = false;
+    if (!frontend_worker_is_done(&state)) {
+        atomic_init(&watchdog.complete, false);
+        if (cbm_thread_create(&watchdog_thread, 0, frontend_join_watchdog, &watchdog) != 0) {
+            _Exit(EXIT_FAILURE);
+        }
+        watchdog_started = true;
+    }
+    if (cbm_thread_join(&worker) != 0) {
+        /* Preserve every object the worker may still reference. */
+        _Exit(EXIT_FAILURE);
+    }
+    if (watchdog_started) {
+        atomic_store_explicit(&watchdog.complete, true, memory_order_release);
+        if (cbm_thread_join(&watchdog_thread) != 0) {
+            _Exit(EXIT_FAILURE);
+        }
+    }
+    if (!cbm_daemon_maintenance_monitor_stop(&maintenance_monitor)) {
+        _Exit(EXIT_FAILURE);
+    }
     if (close_begun) {
-        (void)cbm_daemon_runtime_client_close_finish(
-            state.client, FRONTEND_CLOSE_TIMEOUT_MS);
+        (void)cbm_daemon_runtime_client_close_finish(state.client, FRONTEND_CLOSE_TIMEOUT_MS);
     } else {
         result = -1;
     }

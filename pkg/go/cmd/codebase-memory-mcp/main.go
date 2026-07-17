@@ -14,6 +14,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -31,8 +32,10 @@ import (
 )
 
 const (
-	repo    = "DeusData/codebase-memory-mcp"
-	version = "0.8.1"
+	repo                = "DeusData/codebase-memory-mcp"
+	version             = "0.8.1"
+	windowsLauncherName = "codebase-memory-mcp.exe"
+	windowsPayloadName  = "codebase-memory-mcp.payload.exe"
 
 	maxRedirects            = 5
 	requestTimeout          = 2 * time.Minute
@@ -40,37 +43,109 @@ const (
 	responseHeaderTimeout   = 30 * time.Second
 	candidateTimeout        = 15 * time.Second
 	maxChecksumManifestSize = 1024 * 1024
+
+	windowsPairLockName           = ".codebase-memory-mcp-pair.lock"
+	windowsPairLockWait           = 45 * time.Second
+	windowsPairOwnerlessStale     = 30 * time.Second
+	windowsPairLockPoll           = 25 * time.Millisecond
+	windowsPairLockOwnerFile      = "owner"
+	windowsPairTransactionTagSize = 16
 )
 
+type windowsPairLock struct {
+	path  string
+	token string
+}
+
 func main() {
-	bin, err := ensureBinary()
+	executable, err := ensureBinary()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "codebase-memory-mcp: %v\n", err)
 		os.Exit(1)
 	}
-	if err := execBinary(bin, os.Args[1:]); err != nil {
+	if err := execBinary(executable, os.Args[1:]); err != nil {
+		if runtime.GOOS == "windows" {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				printPortableMutationGuidance(os.Args[1:])
+				os.Exit(exitErr.ExitCode())
+			}
+		}
 		fmt.Fprintf(os.Stderr, "codebase-memory-mcp: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func ensureBinary() (string, error) {
-	bin := binPath()
-	if _, err := os.Stat(bin); err == nil {
-		return bin, nil
+	payload := binPath()
+	ready := regularFileExists(payload)
+	if runtime.GOOS == "windows" {
+		ready = ready && regularFileExists(windowsLauncherPath())
+		if ready {
+			ready = verifyCandidate(windowsLauncherPath()) == nil
+		}
 	}
-	if err := download(bin); err != nil {
+	if ready {
+		return executionPathForOS(payload, runtime.GOOS), nil
+	}
+	if err := download(payload); err != nil {
 		return "", err
 	}
-	return bin, nil
+	return executionPathForOS(payload, runtime.GOOS), nil
 }
 
 func binPath() string {
 	name := "codebase-memory-mcp"
 	if runtime.GOOS == "windows" {
-		name += ".exe"
+		// The payload remains the immutable exact-version pair's readiness
+		// signal. executionPathForOS selects its adjacent permanent launcher.
+		name = windowsPayloadName
 	}
 	return filepath.Join(cacheDir(), version, name)
+}
+
+func executionPathForOS(payload, targetOS string) string {
+	if targetOS == "windows" {
+		return filepath.Join(filepath.Dir(payload), windowsLauncherName)
+	}
+	return payload
+}
+
+func windowsLauncherPath() string {
+	return filepath.Join(filepath.Dir(binPath()), windowsLauncherName)
+}
+
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func printPortableMutationGuidance(args []string) {
+	action := portableMutationAction(args)
+	if action == "" {
+		return
+	}
+	packageCommand := "go install github.com/DeusData/codebase-memory-mcp/pkg/go/cmd/codebase-memory-mcp@latest"
+	if action == "uninstall" {
+		packageCommand = "Remove-Item (Get-Command codebase-memory-mcp).Source"
+	}
+	fmt.Fprintf(
+		os.Stderr,
+		"This Go Windows copy is portable. Use %q for package maintenance, or run %q once to create a managed launcher with coordinated self-update/uninstall.\n",
+		packageCommand,
+		"codebase-memory-mcp install --yes",
+	)
+}
+
+func portableMutationAction(args []string) string {
+	for _, argument := range args {
+		switch argument {
+		case "cli", "hook-augment", "config", "install", "--help", "-h", "--version":
+			return ""
+		case "update", "uninstall":
+			return argument
+		}
+	}
+	return ""
 }
 
 func cacheDir() string {
@@ -164,8 +239,18 @@ func download(dest string) error {
 	}
 
 	binName := "codebase-memory-mcp"
+	requiredNames := []string{binName}
+	archiveNames := requiredNames
 	if platform == "windows" {
-		binName += ".exe"
+		binName = windowsPayloadName
+		requiredNames = []string{windowsLauncherName, windowsPayloadName}
+		archiveNames = []string{
+			windowsLauncherName,
+			windowsPayloadName,
+			"LICENSE",
+			"install.ps1",
+			"THIRD_PARTY_NOTICES.md",
+		}
 	}
 
 	if ext == "tar.gz" {
@@ -173,15 +258,23 @@ func download(dest string) error {
 			return fmt.Errorf("extraction failed: %w", err)
 		}
 	} else {
-		if err := extractZip(archivePath, tmp, binName); err != nil {
+		if err := extractZip(archivePath, tmp, archiveNames, requiredNames); err != nil {
 			return fmt.Errorf("extraction failed: %w", err)
 		}
 	}
-	extracted := filepath.Join(tmp, binName)
-	if err := os.Chmod(extracted, 0755); err != nil {
-		return fmt.Errorf("could not set candidate permissions: %w", err)
+	for _, name := range requiredNames {
+		extracted := filepath.Join(tmp, name)
+		if err := os.Chmod(extracted, 0755); err != nil {
+			return fmt.Errorf("could not set candidate permissions for %s: %w", name, err)
+		}
 	}
-	if err := verifyCandidate(extracted); err != nil {
+	if platform == "windows" {
+		// In portable mode the canonical launcher must successfully resolve the
+		// adjacent payload before the pair is cached.
+		if err := verifyCandidate(filepath.Join(tmp, windowsLauncherName)); err != nil {
+			return fmt.Errorf("downloaded launcher failed verification: %w", err)
+		}
+	} else if err := verifyCandidate(filepath.Join(tmp, binName)); err != nil {
 		return err
 	}
 
@@ -189,7 +282,11 @@ func download(dest string) error {
 		return fmt.Errorf("could not create cache dir: %w", err)
 	}
 
-	if err := installCandidateAtomically(extracted, dest); err != nil {
+	if platform == "windows" {
+		if err := installWindowsPairAtomically(tmp, filepath.Dir(dest)); err != nil {
+			return fmt.Errorf("could not install Windows release pair: %w", err)
+		}
+	} else if err := installCandidateAtomically(filepath.Join(tmp, binName), dest); err != nil {
 		return fmt.Errorf("could not install binary: %w", err)
 	}
 
@@ -330,6 +427,7 @@ func extractTarGz(archivePath, destDir, targetFile string) error {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
+	found := false
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -338,42 +436,131 @@ func extractTarGz(archivePath, destDir, targetFile string) error {
 		if err != nil {
 			return err
 		}
-		if filepath.Base(hdr.Name) == targetFile {
-			out, err := os.Create(filepath.Join(destDir, targetFile))
+		name := strings.ReplaceAll(hdr.Name, "\\", "/")
+		if name == targetFile {
+			if found {
+				os.Remove(filepath.Join(destDir, targetFile))
+				return fmt.Errorf("duplicate %s in archive", targetFile)
+			}
+			found = true
+			out, err := os.OpenFile(
+				filepath.Join(destDir, targetFile),
+				os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+				0600,
+			)
 			if err != nil {
 				return err
 			}
-			defer out.Close()
-			_, err = io.Copy(out, tr) //nolint:gosec
-			return err
+			_, copyErr := io.Copy(out, tr) //nolint:gosec
+			closeErr := out.Close()
+			if copyErr != nil {
+				os.Remove(filepath.Join(destDir, targetFile))
+				return copyErr
+			}
+			if closeErr != nil {
+				os.Remove(filepath.Join(destDir, targetFile))
+				return closeErr
+			}
 		}
 	}
-	return fmt.Errorf("%s not found in archive", targetFile)
+	if !found {
+		return fmt.Errorf("%s not found in archive", targetFile)
+	}
+	return nil
 }
 
-func extractZip(archivePath, destDir, targetFile string) error {
+func extractZip(
+	archivePath, destDir string,
+	archiveNames, extractNames []string,
+) error {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	seen := make(map[string]struct{}, len(r.File))
+	required := make(map[string]struct{}, len(archiveNames))
+	targets := make(map[string]*zip.File, len(extractNames))
+	for _, name := range archiveNames {
+		required[name] = struct{}{}
+	}
 	for _, f := range r.File {
-		if filepath.Base(f.Name) == targetFile {
-			rc, err := f.Open()
-			if err != nil {
-				return err
-			}
-			defer rc.Close()
-			out, err := os.Create(filepath.Join(destDir, targetFile))
-			if err != nil {
-				return err
-			}
-			defer out.Close()
-			_, err = io.Copy(out, rc) //nolint:gosec
+		name, err := validateWindowsZipMember(f.Name)
+		if err != nil {
 			return err
 		}
+		key := strings.ToLower(strings.TrimSuffix(name, "/"))
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate or case-conflicting zip entry: %q", f.Name)
+		}
+		seen[key] = struct{}{}
+		if _, ok := required[name]; !ok || f.FileInfo().IsDir() {
+			return fmt.Errorf(
+				"archive must contain only the exact root files: %s",
+				strings.Join(archiveNames, ", "),
+			)
+		}
+		for _, extractName := range extractNames {
+			if name == extractName {
+				targets[name] = f
+			}
+		}
 	}
-	return fmt.Errorf("%s not found in archive", targetFile)
+	if len(seen) != len(archiveNames) || len(targets) != len(extractNames) {
+		return fmt.Errorf(
+			"archive must contain exactly one of each required root file: %s",
+			strings.Join(archiveNames, ", "),
+		)
+	}
+
+	for _, name := range extractNames {
+		target := targets[name]
+		rc, err := target.Open()
+		if err != nil {
+			return err
+		}
+		outputPath := filepath.Join(destDir, name)
+		out, err := os.OpenFile(
+			outputPath,
+			os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+			0600,
+		)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, copyErr := io.Copy(out, rc) //nolint:gosec
+		closeOutErr := out.Close()
+		closeReadErr := rc.Close()
+		if copyErr != nil {
+			os.Remove(outputPath)
+			return copyErr
+		}
+		if closeOutErr != nil {
+			os.Remove(outputPath)
+			return closeOutErr
+		}
+		if closeReadErr != nil {
+			os.Remove(outputPath)
+			return closeReadErr
+		}
+	}
+	return nil
+}
+
+func validateWindowsZipMember(raw string) (string, error) {
+	name := strings.ReplaceAll(raw, "\\", "/")
+	segmentsName := strings.TrimSuffix(name, "/")
+	if segmentsName == "" || strings.HasPrefix(name, "/") || strings.Contains(name, ":") {
+		return "", fmt.Errorf("unsafe zip entry path: %q", raw)
+	}
+	for _, segment := range strings.Split(segmentsName, "/") {
+		if segment == "" || segment == "." || segment == ".." ||
+			strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
+			return "", fmt.Errorf("unsafe zip entry path: %q", raw)
+		}
+	}
+	return name, nil
 }
 
 func verifyCandidate(path string) error {
@@ -390,6 +577,45 @@ func verifyCandidate(path string) error {
 		return fmt.Errorf("downloaded binary failed to run: %w", err)
 	}
 	return nil
+}
+
+func fileSHA256(path string) ([sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+	source, err := os.Open(path)
+	if err != nil {
+		return digest, err
+	}
+	defer source.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, source); err != nil {
+		return digest, err
+	}
+	copy(digest[:], hash.Sum(nil))
+	return digest, nil
+}
+
+func filesEqualSHA256(left, right string) (bool, error) {
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		return false, err
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		return false, err
+	}
+	if !leftInfo.Mode().IsRegular() || !rightInfo.Mode().IsRegular() ||
+		leftInfo.Size() != rightInfo.Size() {
+		return false, nil
+	}
+	leftDigest, err := fileSHA256(left)
+	if err != nil {
+		return false, err
+	}
+	rightDigest, err := fileSHA256(right)
+	if err != nil {
+		return false, err
+	}
+	return leftDigest == rightDigest, nil
 }
 
 func installCandidateAtomically(src, dst string) error {
@@ -427,18 +653,283 @@ func installCandidateAtomically(src, dst string) error {
 		return err
 	}
 	if err := os.Rename(staged, dst); err != nil {
+		identical, compareErr := filesEqualSHA256(staged, dst)
+		if compareErr == nil && identical {
+			return verifyCandidate(dst)
+		}
 		return err
 	}
 	return nil
 }
 
-func execBinary(bin string, args []string) error {
+func windowsPairToken() (string, error) {
+	raw := make([]byte, windowsPairTransactionTagSize)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func windowsPairLockOwner(lockPath string) (int, string, bool) {
+	data, err := os.ReadFile(filepath.Join(lockPath, windowsPairLockOwnerFile))
+	if err != nil {
+		return 0, "", false
+	}
+	var pid int
+	var token string
+	var extra string
+	count, _ := fmt.Sscanf(string(data), "%d %s %s", &pid, &token, &extra)
+	decoded, decodeErr := hex.DecodeString(token)
+	if count != 2 || pid <= 0 || decodeErr != nil ||
+		len(decoded) != windowsPairTransactionTagSize {
+		return 0, "", false
+	}
+	return pid, token, true
+}
+
+func windowsPairTryReclaimLock(lockPath, contenderToken string) bool {
+	pid, _, ownerOK := windowsPairLockOwner(lockPath)
+	reclaim := ownerOK && !cbmWindowsLockProcessAlive(pid)
+	if !ownerOK {
+		status, err := os.Stat(lockPath)
+		if os.IsNotExist(err) {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+		reclaim = time.Since(status.ModTime()) >= windowsPairOwnerlessStale
+	}
+	if !reclaim {
+		return false
+	}
+	reclaimed := lockPath + ".reclaimed-" + contenderToken
+	if err := os.Rename(lockPath, reclaimed); err != nil {
+		return os.IsNotExist(err)
+	}
+	_ = os.RemoveAll(reclaimed)
+	return true
+}
+
+func acquireWindowsPairLock(dstDir string) (*windowsPairLock, error) {
+	token, err := windowsPairToken()
+	if err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(dstDir, windowsPairLockName)
+	deadline := time.Now().Add(windowsPairLockWait)
+	for {
+		if err := os.Mkdir(lockPath, 0700); err == nil {
+			owner := []byte(fmt.Sprintf("%d %s\n", os.Getpid(), token))
+			ownerPath := filepath.Join(lockPath, windowsPairLockOwnerFile)
+			if err := os.WriteFile(ownerPath, owner, 0600); err != nil {
+				_ = os.RemoveAll(lockPath)
+				return nil, err
+			}
+			return &windowsPairLock{path: lockPath, token: token}, nil
+		} else if !os.IsExist(err) {
+			return nil, err
+		}
+		if windowsPairTryReclaimLock(lockPath, token) {
+			continue
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf(
+				"timed out waiting for Windows package-cache publication lock")
+		}
+		time.Sleep(windowsPairLockPoll)
+	}
+}
+
+func releaseWindowsPairLock(lock *windowsPairLock) error {
+	if lock == nil {
+		return fmt.Errorf("missing Windows package-cache publication lock")
+	}
+	pid, token, ok := windowsPairLockOwner(lock.path)
+	if !ok || pid != os.Getpid() || token != lock.token {
+		return fmt.Errorf("Windows package-cache publication lock ownership changed")
+	}
+	if err := os.Remove(filepath.Join(lock.path, windowsPairLockOwnerFile)); err != nil {
+		return err
+	}
+	return os.Remove(lock.path)
+}
+
+func windowsPairReady(dstDir string, verifier func(string) error) bool {
+	launcher := filepath.Join(dstDir, windowsLauncherName)
+	payload := filepath.Join(dstDir, windowsPayloadName)
+	launcherStatus, launcherErr := os.Lstat(launcher)
+	payloadStatus, payloadErr := os.Lstat(payload)
+	return launcherErr == nil && payloadErr == nil &&
+		launcherStatus.Mode().IsRegular() && payloadStatus.Mode().IsRegular() &&
+		verifier(launcher) == nil
+}
+
+func copyWindowsPairStage(src, dst string) error {
+	input, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	output, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		_ = input.Close()
+		return err
+	}
+	_, copyErr := io.Copy(output, input)
+	closeInputErr := input.Close()
+	chmodErr := output.Chmod(0755)
+	syncErr := output.Sync()
+	closeOutputErr := output.Close()
+	for _, candidate := range []error{
+		copyErr, closeInputErr, chmodErr, syncErr, closeOutputErr,
+	} {
+		if candidate != nil {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func pathMatchesSHA256(path string, expected [sha256.Size]byte) bool {
+	status, err := os.Lstat(path)
+	if err != nil || !status.Mode().IsRegular() {
+		return false
+	}
+	actual, err := fileSHA256(path)
+	return err == nil && actual == expected
+}
+
+func installWindowsPairAtomicallyWithVerifier(
+	srcDir, dstDir string, verifier func(string) error,
+) (result error) {
+	names := []string{windowsLauncherName, windowsPayloadName}
+	if err := verifier(filepath.Join(srcDir, windowsLauncherName)); err != nil {
+		return fmt.Errorf("source Windows release pair failed verification: %w", err)
+	}
+	lock, err := acquireWindowsPairLock(dstDir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if releaseErr := releaseWindowsPairLock(lock); result == nil && releaseErr != nil {
+			result = releaseErr
+		}
+	}()
+
+	// A contender may have committed while this process waited. Preserve that
+	// complete pair regardless of whether its authenticated release variant is
+	// byte-identical to this contender.
+	if windowsPairReady(dstDir, verifier) {
+		return nil
+	}
+
+	transaction, err := windowsPairToken()
+	if err != nil {
+		return err
+	}
+	staged := make(map[string]string, len(names))
+	stagedDigests := make(map[string][sha256.Size]byte, len(names))
+	backups := make(map[string]string, len(names))
+	publishedDigests := make(map[string][sha256.Size]byte, len(names))
+	defer func() {
+		for _, stagedPath := range staged {
+			_ = os.Remove(stagedPath)
+		}
+	}()
+
+	operationErr := func() error {
+		for _, name := range names {
+			stagePath := filepath.Join(
+				dstDir, ".cbm-pair-stage-"+transaction+"-"+name)
+			if err := copyWindowsPairStage(
+				filepath.Join(srcDir, name), stagePath); err != nil {
+				return err
+			}
+			staged[name] = stagePath
+			digest, err := fileSHA256(stagePath)
+			if err != nil {
+				return err
+			}
+			stagedDigests[name] = digest
+		}
+
+		for _, name := range names {
+			target := filepath.Join(dstDir, name)
+			status, err := os.Lstat(target)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if !status.Mode().IsRegular() {
+				return fmt.Errorf(
+					"refusing unsafe Windows package-cache target: %s", target)
+			}
+			backup := filepath.Join(
+				dstDir, ".cbm-pair-backup-"+transaction+"-"+name)
+			if err := os.Rename(target, backup); err != nil {
+				return err
+			}
+			backups[name] = backup
+		}
+
+		// Payload is the readiness signal and is deliberately published last.
+		for _, name := range names {
+			target := filepath.Join(dstDir, name)
+			if err := os.Rename(staged[name], target); err != nil {
+				return err
+			}
+			delete(staged, name)
+			publishedDigests[name] = stagedDigests[name]
+		}
+		if !windowsPairReady(dstDir, verifier) {
+			return fmt.Errorf("published Windows package-cache pair failed verification")
+		}
+		return nil
+	}()
+
+	if operationErr == nil || windowsPairReady(dstDir, verifier) {
+		for _, backup := range backups {
+			_ = os.Remove(backup)
+		}
+		return nil
+	}
+
+	// Roll back only files whose digest proves this transaction published them.
+	for index := len(names) - 1; index >= 0; index-- {
+		name := names[index]
+		digest, ok := publishedDigests[name]
+		target := filepath.Join(dstDir, name)
+		if ok && pathMatchesSHA256(target, digest) {
+			_ = os.Remove(target)
+		}
+	}
+	for _, name := range names {
+		backup, ok := backups[name]
+		if !ok {
+			continue
+		}
+		target := filepath.Join(dstDir, name)
+		if _, err := os.Lstat(target); os.IsNotExist(err) {
+			_ = os.Rename(backup, target)
+		}
+	}
+	return operationErr
+}
+
+func installWindowsPairAtomically(srcDir, dstDir string) error {
+	return installWindowsPairAtomicallyWithVerifier(
+		srcDir, dstDir, verifyCandidate)
+}
+
+func execBinary(executable string, args []string) error {
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command(bin, args...)
+		cmd := exec.Command(executable, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	return syscall.Exec(bin, append([]string{bin}, args...), os.Environ())
+	return syscall.Exec(executable, append([]string{executable}, args...), os.Environ())
 }

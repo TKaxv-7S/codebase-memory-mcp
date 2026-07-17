@@ -76,8 +76,7 @@ void cbm_daemon_coordinator_free(cbm_daemon_coordinator_t *coordinator);
  * quiescent. Hooks are always invoked after releasing the coordinator mutex. */
 bool cbm_daemon_coordinator_set_hooks(cbm_daemon_coordinator_t *coordinator,
                                       const cbm_daemon_coordinator_hooks_t *hooks);
-cbm_daemon_coordinator_state_t
-cbm_daemon_coordinator_state(cbm_daemon_coordinator_t *coordinator);
+cbm_daemon_coordinator_state_t cbm_daemon_coordinator_state(cbm_daemon_coordinator_t *coordinator);
 
 /* Client IDs are daemon-issued, nonzero, monotonic, and never recycled. */
 cbm_daemon_client_id_t cbm_daemon_client_connected(cbm_daemon_coordinator_t *coordinator,
@@ -91,14 +90,12 @@ size_t cbm_daemon_active_clients(cbm_daemon_coordinator_t *coordinator);
 
 /* Every accepted subscription receives a unique daemon-issued handle. The
  * first subscriber starts the physical resource; later subscribers join it. */
-cbm_daemon_subscription_result_t
-cbm_daemon_job_subscribe(cbm_daemon_coordinator_t *coordinator,
-                         cbm_daemon_client_id_t client_id, const char *project_key,
-                         cbm_daemon_subscription_id_t *subscription_id);
-cbm_daemon_subscription_result_t
-cbm_daemon_watch_subscribe(cbm_daemon_coordinator_t *coordinator,
-                           cbm_daemon_client_id_t client_id, const char *project_key,
-                           cbm_daemon_subscription_id_t *subscription_id);
+cbm_daemon_subscription_result_t cbm_daemon_job_subscribe(
+    cbm_daemon_coordinator_t *coordinator, cbm_daemon_client_id_t client_id,
+    const char *project_key, cbm_daemon_subscription_id_t *subscription_id);
+cbm_daemon_subscription_result_t cbm_daemon_watch_subscribe(
+    cbm_daemon_coordinator_t *coordinator, cbm_daemon_client_id_t client_id,
+    const char *project_key, cbm_daemon_subscription_id_t *subscription_id);
 bool cbm_daemon_job_unsubscribe(cbm_daemon_coordinator_t *coordinator,
                                 cbm_daemon_client_id_t client_id,
                                 cbm_daemon_subscription_id_t subscription_id);
@@ -106,10 +103,8 @@ bool cbm_daemon_watch_unsubscribe(cbm_daemon_coordinator_t *coordinator,
                                   cbm_daemon_client_id_t client_id,
                                   cbm_daemon_subscription_id_t subscription_id);
 
-size_t cbm_daemon_job_subscribers(cbm_daemon_coordinator_t *coordinator,
-                                  const char *project_key);
-size_t cbm_daemon_watch_subscribers(cbm_daemon_coordinator_t *coordinator,
-                                    const char *project_key);
+size_t cbm_daemon_job_subscribers(cbm_daemon_coordinator_t *coordinator, const char *project_key);
+size_t cbm_daemon_watch_subscribers(cbm_daemon_coordinator_t *coordinator, const char *project_key);
 size_t cbm_daemon_active_jobs(cbm_daemon_coordinator_t *coordinator);
 size_t cbm_daemon_active_watches(cbm_daemon_coordinator_t *coordinator);
 cbm_daemon_job_state_t cbm_daemon_job_state(cbm_daemon_coordinator_t *coordinator,
@@ -117,12 +112,11 @@ cbm_daemon_job_state_t cbm_daemon_job_state(cbm_daemon_coordinator_t *coordinato
 
 /* Cancellation is two phase. Losing the final subscriber requests cancel;
  * the job remains active until its supervisor reports completion/reaping. */
-bool cbm_daemon_job_reaping(cbm_daemon_coordinator_t *coordinator,
-                            const char *project_key);
-bool cbm_daemon_job_reaped(cbm_daemon_coordinator_t *coordinator,
-                           const char *project_key, uint64_t now_ms);
-bool cbm_daemon_job_completed(cbm_daemon_coordinator_t *coordinator,
-                              const char *project_key, uint64_t now_ms);
+bool cbm_daemon_job_reaping(cbm_daemon_coordinator_t *coordinator, const char *project_key);
+bool cbm_daemon_job_reaped(cbm_daemon_coordinator_t *coordinator, const char *project_key,
+                           uint64_t now_ms);
+bool cbm_daemon_job_completed(cbm_daemon_coordinator_t *coordinator, const char *project_key,
+                              uint64_t now_ms);
 
 /* STOPPING is terminal. Exit is ready only after every job/watch is gone. */
 bool cbm_daemon_should_exit(cbm_daemon_coordinator_t *coordinator, uint64_t now_ms);

@@ -52,8 +52,7 @@ static int private_lock_macos_set_mutating_acl(const char *path) {
                  acl_add_perm(permissions, ACL_WRITE_DATA) == 0 &&
                  acl_add_perm(permissions, ACL_WRITE_ATTRIBUTES) == 0 &&
                  acl_add_perm(permissions, ACL_DELETE) == 0 &&
-                 acl_set_permset(entry, permissions) == 0 &&
-                 acl_valid(acl) == 0;
+                 acl_set_permset(entry, permissions) == 0 && acl_valid(acl) == 0;
     errno = valid ? 0 : errno;
     int result = valid ? acl_set_file(path, ACL_TYPE_EXTENDED, acl) : -1;
     int saved_error = errno;
@@ -214,21 +213,19 @@ TEST(private_file_lock_payload_requires_exclusive_write_and_survives_reopen) {
     cbm_private_file_lock_status_t read_status = CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t shared_write_status = CBM_PRIVATE_FILE_LOCK_IO;
     if (started) {
-        writer_status = cbm_private_file_lock_try_acquire(
-            fixture.directory, "payload.lock", CBM_PRIVATE_FILE_LOCK_EX, &writer);
+        writer_status = cbm_private_file_lock_try_acquire(fixture.directory, "payload.lock",
+                                                          CBM_PRIVATE_FILE_LOCK_EX, &writer);
     }
     if (writer_status == CBM_PRIVATE_FILE_LOCK_OK) {
-        write_status = cbm_private_file_lock_payload_write(
-            writer, payload, sizeof(payload));
+        write_status = cbm_private_file_lock_payload_write(writer, payload, sizeof(payload));
         (void)cbm_private_file_lock_release(&writer);
-        reader_status = cbm_private_file_lock_try_acquire(
-            fixture.directory, "payload.lock", CBM_PRIVATE_FILE_LOCK_SH, &reader);
+        reader_status = cbm_private_file_lock_try_acquire(fixture.directory, "payload.lock",
+                                                          CBM_PRIVATE_FILE_LOCK_SH, &reader);
     }
     if (reader_status == CBM_PRIVATE_FILE_LOCK_OK) {
-        read_status = cbm_private_file_lock_payload_read(
-            reader, readback, sizeof(readback), &readback_length);
-        shared_write_status = cbm_private_file_lock_payload_write(
-            reader, payload, sizeof(payload));
+        read_status = cbm_private_file_lock_payload_read(reader, readback, sizeof(readback),
+                                                         &readback_length);
+        shared_write_status = cbm_private_file_lock_payload_write(reader, payload, sizeof(payload));
     }
     if (reader) {
         (void)cbm_private_file_lock_release(&reader);
@@ -688,30 +685,26 @@ TEST(private_file_lock_macos_rejects_directory_acl_added_after_adoption) {
     private_lock_fixture_t fixture;
     bool started = private_lock_fixture_start(&fixture);
     char lock_path[PRIVATE_LOCK_TEST_PATH_CAP] = {0};
-    bool path_ok =
-        started && private_lock_path(lock_path, &fixture, "acl-directory.lock");
-    int acl_fixture =
-        path_ok ? private_lock_macos_set_mutating_acl(fixture.root) : -1;
+    bool path_ok = started && private_lock_path(lock_path, &fixture, "acl-directory.lock");
+    int acl_fixture = path_ok ? private_lock_macos_set_mutating_acl(fixture.root) : -1;
     if (acl_fixture == 0) {
         private_lock_fixture_finish(&fixture);
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     struct stat root_status = {0};
-    bool mode_stayed_private =
-        acl_fixture == 1 && lstat(fixture.root, &root_status) == 0 &&
-        S_ISDIR(root_status.st_mode) && (root_status.st_mode & 07777) == 0700;
+    bool mode_stayed_private = acl_fixture == 1 && lstat(fixture.root, &root_status) == 0 &&
+                               S_ISDIR(root_status.st_mode) &&
+                               (root_status.st_mode & 07777) == 0700;
 
     cbm_private_file_lock_t *lock = NULL;
     cbm_private_file_lock_status_t acquire_status =
         mode_stayed_private
-            ? cbm_private_file_lock_try_acquire(
-                  fixture.directory, "acl-directory.lock",
-                  CBM_PRIVATE_FILE_LOCK_EX, &lock)
+            ? cbm_private_file_lock_try_acquire(fixture.directory, "acl-directory.lock",
+                                                CBM_PRIVATE_FILE_LOCK_EX, &lock)
             : CBM_PRIVATE_FILE_LOCK_IO;
     struct stat unexpected = {0};
     errno = 0;
-    bool file_was_not_created =
-        lstat(lock_path, &unexpected) != 0 && errno == ENOENT;
+    bool file_was_not_created = lstat(lock_path, &unexpected) != 0 && errno == ENOENT;
     if (lock) {
         (void)cbm_private_file_lock_release(&lock);
     }
@@ -731,18 +724,15 @@ TEST(private_file_lock_macos_rejects_file_acl_added_after_acquisition) {
     private_lock_fixture_t fixture;
     bool started = private_lock_fixture_start(&fixture);
     char lock_path[PRIVATE_LOCK_TEST_PATH_CAP] = {0};
-    bool path_ok =
-        started && private_lock_path(lock_path, &fixture, "acl-file.lock");
+    bool path_ok = started && private_lock_path(lock_path, &fixture, "acl-file.lock");
     cbm_private_file_lock_t *lock = NULL;
     cbm_private_file_lock_status_t acquire_status =
-        path_ok ? cbm_private_file_lock_try_acquire(
-                      fixture.directory, "acl-file.lock",
-                      CBM_PRIVATE_FILE_LOCK_EX, &lock)
+        path_ok ? cbm_private_file_lock_try_acquire(fixture.directory, "acl-file.lock",
+                                                    CBM_PRIVATE_FILE_LOCK_EX, &lock)
                 : CBM_PRIVATE_FILE_LOCK_IO;
-    int acl_fixture =
-        acquire_status == CBM_PRIVATE_FILE_LOCK_OK
-            ? private_lock_macos_set_mutating_acl(lock_path)
-            : -1;
+    int acl_fixture = acquire_status == CBM_PRIVATE_FILE_LOCK_OK
+                          ? private_lock_macos_set_mutating_acl(lock_path)
+                          : -1;
     if (acl_fixture == 0) {
         if (lock) {
             (void)cbm_private_file_lock_release(&lock);
@@ -751,22 +741,18 @@ TEST(private_file_lock_macos_rejects_file_acl_added_after_acquisition) {
         SKIP_PLATFORM("macOS fixture filesystem has no extended ACL support");
     }
     struct stat file_status = {0};
-    bool mode_stayed_private =
-        acl_fixture == 1 && lstat(lock_path, &file_status) == 0 &&
-        S_ISREG(file_status.st_mode) && (file_status.st_mode & 07777) == 0600;
+    bool mode_stayed_private = acl_fixture == 1 && lstat(lock_path, &file_status) == 0 &&
+                               S_ISREG(file_status.st_mode) &&
+                               (file_status.st_mode & 07777) == 0600;
     static const unsigned char payload[] = {'a', 'c', 'l'};
     cbm_private_file_lock_status_t payload_status =
-        mode_stayed_private
-            ? cbm_private_file_lock_payload_write(lock, payload,
-                                                  sizeof(payload))
-            : CBM_PRIVATE_FILE_LOCK_IO;
+        mode_stayed_private ? cbm_private_file_lock_payload_write(lock, payload, sizeof(payload))
+                            : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_status_t release_status =
         lock ? cbm_private_file_lock_release(&lock) : CBM_PRIVATE_FILE_LOCK_IO;
     cbm_private_file_lock_t *reopened = NULL;
-    cbm_private_file_lock_status_t reopen_status =
-        cbm_private_file_lock_try_acquire(
-            fixture.directory, "acl-file.lock", CBM_PRIVATE_FILE_LOCK_EX,
-            &reopened);
+    cbm_private_file_lock_status_t reopen_status = cbm_private_file_lock_try_acquire(
+        fixture.directory, "acl-file.lock", CBM_PRIVATE_FILE_LOCK_EX, &reopened);
     if (reopened) {
         (void)cbm_private_file_lock_release(&reopened);
     }

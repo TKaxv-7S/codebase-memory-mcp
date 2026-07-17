@@ -283,8 +283,9 @@ void cbm_pipeline_set_before_publish_hook_for_tests(
     }
 }
 
-void cbm_pipeline_set_rename_hook_for_tests(
-    cbm_pipeline_t *p, int (*hook)(const char *, const char *, void *), void *ctx) {
+void cbm_pipeline_set_rename_hook_for_tests(cbm_pipeline_t *p,
+                                            int (*hook)(const char *, const char *, void *),
+                                            void *ctx) {
     if (p) {
         p->rename_hook = hook;
         p->rename_hook_ctx = ctx;
@@ -1283,8 +1284,8 @@ static int dump_and_persist_hashes(cbm_pipeline_t *p, const cbm_file_info_t *fil
         free(db_path);
         return CBM_NOT_FOUND;
     }
-    bool hash_records_complete = true;
     {
+        bool hash_records_complete = true;
         CBM_PROF_START(t_delhash);
         if (cbm_store_delete_file_hashes(hash_store, p->project_name) != CBM_STORE_OK) {
             hash_records_complete = false;
@@ -1652,9 +1653,8 @@ static int cbm_pipeline_run_staged(cbm_pipeline_t *p, bool *was_incremental) {
         goto cleanup;
     }
 
-    cbm_log_info("pipeline.done", "nodes", itoa_buf(cbm_gbuf_node_count(p->gbuf)), "edges",
-                 itoa_buf(cbm_gbuf_edge_count(p->gbuf)), "elapsed_ms",
-                 itoa_buf((int)elapsed_ms(t0)));
+    cbm_log_info("pipeline.done", "nodes", itoa_buf(p->committed_nodes), "edges",
+                 itoa_buf(p->committed_edges), "elapsed_ms", itoa_buf((int)elapsed_ms(t0)));
     CBM_PROF_END("pipeline", "TOTAL", t_pipeline_total);
 
 cleanup:
@@ -1798,9 +1798,10 @@ static int seal_staging_db(const char *staging_path) {
     if (!store) {
         return CBM_NOT_FOUND;
     }
-    int rc = cbm_store_check_integrity(store) && cbm_store_prepare_for_publish(store) == CBM_STORE_OK
-                 ? 0
-                 : CBM_NOT_FOUND;
+    int rc =
+        cbm_store_check_integrity(store) && cbm_store_prepare_for_publish(store) == CBM_STORE_OK
+            ? 0
+            : CBM_NOT_FOUND;
     cbm_store_close(store);
     if (rc == 0 && cbm_remove_db_sidecars(staging_path) != 0) {
         rc = CBM_NOT_FOUND;
@@ -1811,13 +1812,11 @@ static int seal_staging_db(const char *staging_path) {
 static int export_after_publish(cbm_pipeline_t *p, const char *final_path, bool was_incremental) {
     if (p->persistence) {
         CBM_PROF_START(t_art);
-        int rc =
-            cbm_artifact_export(final_path, p->repo_path, p->project_name, CBM_ARTIFACT_BEST);
+        int rc = cbm_artifact_export(final_path, p->repo_path, p->project_name, CBM_ARTIFACT_BEST);
         CBM_PROF_END("persist", "6_artifact_export", t_art);
         if (rc != 0) {
             const char *err = cbm_artifact_export_last_error();
-            cbm_log_error("pipeline.err", "phase", "artifact_export", "err",
-                          err ? err : "unknown");
+            cbm_log_error("pipeline.err", "phase", "artifact_export", "err", err ? err : "unknown");
         }
         return rc;
     }
@@ -1846,8 +1845,7 @@ int cbm_pipeline_run(cbm_pipeline_t *p) {
 
     bool backup_succeeded = false;
     if (final_existed) {
-        backup_succeeded =
-            cbm_store_backup_path(final_path, staging_path) == CBM_STORE_OK;
+        backup_succeeded = cbm_store_backup_path(final_path, staging_path) == CBM_STORE_OK;
         if (!backup_succeeded) {
             cbm_log_warn("pipeline.stage", "action", "backup_failed_full_rebuild", "path",
                          final_path);

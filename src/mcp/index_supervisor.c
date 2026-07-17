@@ -31,8 +31,7 @@
 #define worker_getpid getpid
 #endif
 
-_Static_assert(CBM_INDEX_WORKER_BUILD_FINGERPRINT_SIZE ==
-                   CBM_DAEMON_BUILD_FINGERPRINT_SIZE,
+_Static_assert(CBM_INDEX_WORKER_BUILD_FINGERPRINT_SIZE == CBM_DAEMON_BUILD_FINGERPRINT_SIZE,
                "worker and daemon build fingerprint sizes must match");
 
 /* ── Worker-role state ────────────────────────────────────────────── */
@@ -137,9 +136,8 @@ static bool worker_parse_positive_size(const char *text, size_t *value_out) {
     return true;
 }
 
-cbm_index_worker_argv_status_t
-cbm_index_worker_parse_process_argv(int argc, char *const argv[],
-                                    cbm_index_worker_invocation_t *invocation_out) {
+cbm_index_worker_argv_status_t cbm_index_worker_parse_process_argv(
+    int argc, char *const argv[], cbm_index_worker_invocation_t *invocation_out) {
     if (invocation_out) {
         memset(invocation_out, 0, sizeof(*invocation_out));
     }
@@ -153,13 +151,12 @@ cbm_index_worker_parse_process_argv(int argc, char *const argv[],
     if (!contains_worker_role) {
         return CBM_INDEX_WORKER_ARGV_NOT_WORKER;
     }
-    if (!invocation_out || argc < 9 || !argv || !argv[0] || !argv[0][0] ||
-        !argv[1] || strcmp(argv[1], "cli") != 0 || !argv[2] ||
-        strcmp(argv[2], "--index-worker") != 0 || !argv[3] ||
-        strcmp(argv[3], CBM_INDEX_WORKER_BUILD_ARG) != 0 ||
+    if (!invocation_out || argc < 9 || !argv || !argv[0] || !argv[0][0] || !argv[1] ||
+        strcmp(argv[1], "cli") != 0 || !argv[2] || strcmp(argv[2], "--index-worker") != 0 ||
+        !argv[3] || strcmp(argv[3], CBM_INDEX_WORKER_BUILD_ARG) != 0 ||
         !worker_fingerprint_valid(argv[4]) || !argv[5] ||
-        strcmp(argv[5], "index_repository") != 0 || !argv[6] || !argv[6][0] ||
-        !argv[7] || strcmp(argv[7], "--response-out") != 0 || !argv[8] || !argv[8][0]) {
+        strcmp(argv[5], "index_repository") != 0 || !argv[6] || !argv[6][0] || !argv[7] ||
+        strcmp(argv[7], "--response-out") != 0 || !argv[8] || !argv[8][0]) {
         return CBM_INDEX_WORKER_ARGV_INVALID;
     }
 
@@ -169,16 +166,14 @@ cbm_index_worker_parse_process_argv(int argc, char *const argv[],
         .response_out = argv[8],
     };
     int next = 9;
-    if (next < argc && argv[next] &&
-        strcmp(argv[next], CBM_INDEX_WORKER_MEMORY_BUDGET_ARG) == 0) {
+    if (next < argc && argv[next] && strcmp(argv[next], CBM_INDEX_WORKER_MEMORY_BUDGET_ARG) == 0) {
         if (next + 1 >= argc ||
             !worker_parse_positive_size(argv[next + 1], &parsed.memory_budget_bytes)) {
             return CBM_INDEX_WORKER_ARGV_INVALID;
         }
         next += 2;
     }
-    if (next < argc && argv[next] &&
-        strcmp(argv[next], CBM_INDEX_WORKER_SINGLE_THREAD_ARG) == 0) {
+    if (next < argc && argv[next] && strcmp(argv[next], CBM_INDEX_WORKER_SINGLE_THREAD_ARG) == 0) {
         parsed.single_thread = true;
         next++;
     }
@@ -189,8 +184,7 @@ cbm_index_worker_parse_process_argv(int argc, char *const argv[],
         parsed.marker_file = argv[next + 1];
         next += 2;
     }
-    if (next < argc && argv[next] &&
-        strcmp(argv[next], CBM_INDEX_WORKER_QUARANTINE_ARG) == 0) {
+    if (next < argc && argv[next] && strcmp(argv[next], CBM_INDEX_WORKER_QUARANTINE_ARG) == 0) {
         if (next + 1 >= argc || !argv[next + 1] || !argv[next + 1][0]) {
             return CBM_INDEX_WORKER_ARGV_INVALID;
         }
@@ -267,8 +261,8 @@ bool cbm_index_supervisor_should_wrap(void) {
 
 static bool supervisor_disable_requested(void) {
     char supervisor_setting[CBM_SZ_32] = {0};
-    return cbm_safe_getenv("CBM_INDEX_SUPERVISOR", supervisor_setting,
-                           sizeof(supervisor_setting), NULL) &&
+    return cbm_safe_getenv("CBM_INDEX_SUPERVISOR", supervisor_setting, sizeof(supervisor_setting),
+                           NULL) &&
            strcmp(supervisor_setting, "0") == 0;
 }
 
@@ -567,10 +561,10 @@ static void worker_terminal_log(cbm_index_worker_handle_t *handle) {
     }
 }
 
-int cbm_index_worker_start_with_log(
-    const char *args_json, size_t memory_budget_bytes, bool single_thread,
-    const char *marker_file, const char *quarantine_file, cbm_proc_log_cb log_callback,
-    void *log_context, cbm_index_worker_handle_t **handle_out) {
+int cbm_index_worker_start_with_log(const char *args_json, size_t memory_budget_bytes,
+                                    bool single_thread, const char *marker_file,
+                                    const char *quarantine_file, cbm_proc_log_cb log_callback,
+                                    void *log_context, cbm_index_worker_handle_t **handle_out) {
     if (handle_out) {
         *handle_out = NULL;
     }
@@ -760,18 +754,18 @@ void cbm_index_worker_destroy(cbm_index_worker_handle_t *handle) {
     free(handle);
 }
 
-int cbm_index_spawn_worker_with_log_cancel(
-    const char *args_json, bool single_thread, const char *marker_file,
-    const char *quarantine_file, cbm_proc_log_cb log_callback, void *log_context,
-    const atomic_int *cancel_requested, cbm_index_worker_result_t *result) {
+int cbm_index_spawn_worker_with_log_cancel(const char *args_json, bool single_thread,
+                                           const char *marker_file, const char *quarantine_file,
+                                           cbm_proc_log_cb log_callback, void *log_context,
+                                           const atomic_int *cancel_requested,
+                                           cbm_index_worker_result_t *result) {
     if (!result) {
         return -1;
     }
     worker_result_init(result);
     cbm_index_worker_handle_t *handle = NULL;
-    if (cbm_index_worker_start_with_log(args_json, 0, single_thread, marker_file,
-                                        quarantine_file, log_callback, log_context,
-                                        &handle) != 0) {
+    if (cbm_index_worker_start_with_log(args_json, 0, single_thread, marker_file, quarantine_file,
+                                        log_callback, log_context, &handle) != 0) {
         return -1;
     }
     const cbm_index_worker_result_t *cached = NULL;
@@ -797,19 +791,19 @@ int cbm_index_spawn_worker_with_log_cancel(
     return 0;
 }
 
-int cbm_index_spawn_worker_with_log(
-    const char *args_json, bool single_thread, const char *marker_file,
-    const char *quarantine_file, cbm_proc_log_cb log_callback, void *log_context,
-    cbm_index_worker_result_t *result) {
-    return cbm_index_spawn_worker_with_log_cancel(
-        args_json, single_thread, marker_file, quarantine_file, log_callback,
-        log_context, NULL, result);
+int cbm_index_spawn_worker_with_log(const char *args_json, bool single_thread,
+                                    const char *marker_file, const char *quarantine_file,
+                                    cbm_proc_log_cb log_callback, void *log_context,
+                                    cbm_index_worker_result_t *result) {
+    return cbm_index_spawn_worker_with_log_cancel(args_json, single_thread, marker_file,
+                                                  quarantine_file, log_callback, log_context, NULL,
+                                                  result);
 }
 
 int cbm_index_spawn_worker(const char *args_json, bool single_thread, const char *marker_file,
                            const char *quarantine_file, cbm_index_worker_result_t *result) {
-    return cbm_index_spawn_worker_with_log(args_json, single_thread, marker_file,
-                                            quarantine_file, NULL, NULL, result);
+    return cbm_index_spawn_worker_with_log(args_json, single_thread, marker_file, quarantine_file,
+                                           NULL, NULL, result);
 }
 
 void cbm_index_worker_result_free(cbm_index_worker_result_t *result) {

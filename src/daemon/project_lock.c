@@ -34,8 +34,7 @@ static bool project_lock_key(const char *project, char out[PROJECT_LOCK_KEY_CAP]
     memcpy(out, prefix, prefix_length);
     for (size_t index = 0; index < project_length; index++) {
         unsigned char ch = (unsigned char)project[index];
-        out[prefix_length + index] =
-            (char)(ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch);
+        out[prefix_length + index] = (char)(ch >= 'A' && ch <= 'Z' ? ch + ('a' - 'A') : ch);
     }
     out[prefix_length + project_length] = '\0';
     return true;
@@ -65,8 +64,7 @@ cbm_project_lock_manager_t *cbm_project_lock_manager_new(
     return manager;
 }
 
-cbm_private_file_lock_status_t cbm_project_lock_lease_release(
-    cbm_project_lock_lease_t **lease_io) {
+cbm_private_file_lock_status_t cbm_project_lock_lease_release(cbm_project_lock_lease_t **lease_io) {
     if (!lease_io || !*lease_io) {
         return CBM_PRIVATE_FILE_LOCK_IO;
     }
@@ -79,8 +77,7 @@ cbm_private_file_lock_status_t cbm_project_lock_lease_release(
         }
     }
     if (lease->project_set) {
-        cbm_private_file_lock_status_t set_status =
-            cbm_lock_lease_release(&lease->project_set);
+        cbm_private_file_lock_status_t set_status = cbm_lock_lease_release(&lease->project_set);
         if (set_status != CBM_PRIVATE_FILE_LOCK_OK) {
             result = set_status;
         }
@@ -101,20 +98,18 @@ static cbm_private_file_lock_status_t project_lock_failed_acquire(
         return status;
     }
     cbm_project_lock_lease_t *cleanup = lease;
-    cbm_private_file_lock_status_t cleanup_status =
-        cbm_project_lock_lease_release(&cleanup);
+    cbm_private_file_lock_status_t cleanup_status = cbm_project_lock_lease_release(&cleanup);
     if (cleanup) {
         *lease_out = cleanup;
         return CBM_PRIVATE_FILE_LOCK_IO;
     }
-    return cleanup_status == CBM_PRIVATE_FILE_LOCK_OK ? status
-                                                       : CBM_PRIVATE_FILE_LOCK_IO;
+    return cleanup_status == CBM_PRIVATE_FILE_LOCK_OK ? status : CBM_PRIVATE_FILE_LOCK_IO;
 }
 
 static cbm_private_file_lock_status_t project_lock_acquire_internal(
-    cbm_project_lock_manager_t *manager, const char *project,
-    uint64_t deadline_ms, const cbm_lock_cancel_token_t *cancel_token,
-    bool try_once, cbm_project_lock_lease_t **lease_out) {
+    cbm_project_lock_manager_t *manager, const char *project, uint64_t deadline_ms,
+    const cbm_lock_cancel_token_t *cancel_token, bool try_once,
+    cbm_project_lock_lease_t **lease_out) {
     if (lease_out) {
         *lease_out = NULL;
     }
@@ -131,29 +126,23 @@ static cbm_private_file_lock_status_t project_lock_acquire_internal(
         return CBM_PRIVATE_FILE_LOCK_IO;
     }
     cbm_private_file_lock_status_t status =
-        try_once
-            ? cbm_lock_registry_try_acquire(
-                  manager->registry, PROJECT_SET_KEY,
-                  wildcard ? CBM_PRIVATE_FILE_LOCK_EX
-                           : CBM_PRIVATE_FILE_LOCK_SH,
-                  &lease->project_set)
-            : cbm_lock_registry_acquire(
-                  manager->registry, PROJECT_SET_KEY,
-                  wildcard ? CBM_PRIVATE_FILE_LOCK_EX
-                           : CBM_PRIVATE_FILE_LOCK_SH,
-                  deadline_ms, cancel_token, &lease->project_set);
+        try_once ? cbm_lock_registry_try_acquire(manager->registry, PROJECT_SET_KEY,
+                                                 wildcard ? CBM_PRIVATE_FILE_LOCK_EX
+                                                          : CBM_PRIVATE_FILE_LOCK_SH,
+                                                 &lease->project_set)
+                 : cbm_lock_registry_acquire(manager->registry, PROJECT_SET_KEY,
+                                             wildcard ? CBM_PRIVATE_FILE_LOCK_EX
+                                                      : CBM_PRIVATE_FILE_LOCK_SH,
+                                             deadline_ms, cancel_token, &lease->project_set);
     if (status != CBM_PRIVATE_FILE_LOCK_OK) {
         return project_lock_failed_acquire(lease, status, lease_out);
     }
     if (!wildcard) {
-        status = try_once
-                     ? cbm_lock_registry_try_acquire(
-                           manager->registry, project_key,
-                           CBM_PRIVATE_FILE_LOCK_EX, &lease->project)
-                     : cbm_lock_registry_acquire(
-                           manager->registry, project_key,
-                           CBM_PRIVATE_FILE_LOCK_EX, deadline_ms,
-                           cancel_token, &lease->project);
+        status = try_once ? cbm_lock_registry_try_acquire(manager->registry, project_key,
+                                                          CBM_PRIVATE_FILE_LOCK_EX, &lease->project)
+                          : cbm_lock_registry_acquire(manager->registry, project_key,
+                                                      CBM_PRIVATE_FILE_LOCK_EX, deadline_ms,
+                                                      cancel_token, &lease->project);
         if (status != CBM_PRIVATE_FILE_LOCK_OK) {
             return project_lock_failed_acquire(lease, status, lease_out);
         }
@@ -162,23 +151,22 @@ static cbm_private_file_lock_status_t project_lock_acquire_internal(
     return CBM_PRIVATE_FILE_LOCK_OK;
 }
 
-cbm_private_file_lock_status_t cbm_project_lock_acquire(
-    cbm_project_lock_manager_t *manager, const char *project,
-    uint64_t deadline_ms, const cbm_lock_cancel_token_t *cancel_token,
-    cbm_project_lock_lease_t **lease_out) {
-    return project_lock_acquire_internal(manager, project, deadline_ms,
-                                         cancel_token, false, lease_out);
+cbm_private_file_lock_status_t cbm_project_lock_acquire(cbm_project_lock_manager_t *manager,
+                                                        const char *project, uint64_t deadline_ms,
+                                                        const cbm_lock_cancel_token_t *cancel_token,
+                                                        cbm_project_lock_lease_t **lease_out) {
+    return project_lock_acquire_internal(manager, project, deadline_ms, cancel_token, false,
+                                         lease_out);
 }
 
-cbm_private_file_lock_status_t cbm_project_lock_try_acquire(
-    cbm_project_lock_manager_t *manager, const char *project,
-    cbm_project_lock_lease_t **lease_out) {
-    return project_lock_acquire_internal(manager, project, UINT64_MAX, NULL,
-                                         true, lease_out);
+cbm_private_file_lock_status_t cbm_project_lock_try_acquire(cbm_project_lock_manager_t *manager,
+                                                            const char *project,
+                                                            cbm_project_lock_lease_t **lease_out) {
+    return project_lock_acquire_internal(manager, project, UINT64_MAX, NULL, true, lease_out);
 }
 
-cbm_private_file_lock_status_t cbm_project_lock_request_cancel(
-    cbm_project_lock_manager_t *manager, cbm_lock_cancel_token_t *token) {
+cbm_private_file_lock_status_t cbm_project_lock_request_cancel(cbm_project_lock_manager_t *manager,
+                                                               cbm_lock_cancel_token_t *token) {
     return manager ? cbm_lock_registry_request_cancel(manager->registry, token)
                    : CBM_PRIVATE_FILE_LOCK_IO;
 }
@@ -189,8 +177,7 @@ cbm_private_file_lock_status_t cbm_project_lock_manager_free(
         return CBM_PRIVATE_FILE_LOCK_IO;
     }
     cbm_project_lock_manager_t *manager = *manager_io;
-    cbm_private_file_lock_status_t status =
-        cbm_lock_registry_free(&manager->registry);
+    cbm_private_file_lock_status_t status = cbm_lock_registry_free(&manager->registry);
     if (status != CBM_PRIVATE_FILE_LOCK_OK) {
         return status;
     }

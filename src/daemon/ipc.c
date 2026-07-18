@@ -3974,9 +3974,19 @@ static bool win_file_acl_secure(win_security_t *security, HANDLE file, DWORD mut
         size_t sid_capacity = (size_t)header->AceSize - sid_offset;
         bool creator_owner_inherit_only = (header->AceFlags & INHERIT_ONLY_ACE) != 0U;
         if (!win_bounded_sid_trusted(security, sid, sid_capacity, creator_owner_inherit_only)) {
+            /* Name the untrusted identity class so a harness/profile ACL leak
+             * (an inherited Users / Authenticated Users / Everyone ACE) is
+             * distinguishable from a genuinely hostile grant. */
+            const char *sid_class =
+                security->is_well_known_sid((PSID)sid, WinBuiltinUsersSid) ? "BUILTIN\\Users"
+                : security->is_well_known_sid((PSID)sid, WinAuthenticatedUserSid)
+                    ? "Authenticated Users"
+                : security->is_well_known_sid((PSID)sid, WinWorldSid)       ? "Everyone"
+                : security->is_well_known_sid((PSID)sid, WinInteractiveSid) ? "INTERACTIVE"
+                                                                            : "other";
             ipc_validation_detail_set(
-                "DACL entry %lu grants mutation rights 0x%08lx to an untrusted identity",
-                (unsigned long)index, (unsigned long)(ace->Mask & mutation));
+                "DACL entry %lu grants mutation rights 0x%08lx to untrusted identity (%s)",
+                (unsigned long)index, (unsigned long)(ace->Mask & mutation), sid_class);
             secure = false;
         }
     }

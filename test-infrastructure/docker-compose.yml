@@ -25,7 +25,7 @@ services:
     environment:
       CCACHE_DIR: /root/.ccache
       CCACHE_MAXSIZE: 1500M
-    command: ["CC=gcc", "CXX=g++"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-arm64"]
 
   test-amd64:
     build:
@@ -39,7 +39,7 @@ services:
     environment:
       CCACHE_DIR: /root/.ccache
       CCACHE_MAXSIZE: 1500M
-    command: ["CC=gcc", "CXX=g++"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-amd64"]
 
   # ── Linux production build (-O2 -Werror) ───────────────────
   build:
@@ -50,7 +50,7 @@ services:
     volumes:
       - ..:/src
     entrypoint: ["scripts/build.sh"]
-    command: ["CC=gcc", "CXX=g++"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-arm64"]
 
   build-amd64:
     build:
@@ -60,7 +60,7 @@ services:
     volumes:
       - ..:/src
     entrypoint: ["scripts/build.sh"]
-    command: ["CC=gcc", "CXX=g++"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-amd64"]
 
   # ── Windows cross-compile + test (llvm-mingw + Wine) ────────
   build-windows:
@@ -79,12 +79,13 @@ services:
     volumes:
       - ..:/src
     command: >-
-      make -j4 -f Makefile.cbm clean-c &&
-      make -j4 -f Makefile.cbm build/c/test-runner
+      make -j4 -f Makefile.cbm clean-c BUILD_DIR=build/win-cross &&
+      make -j4 -f Makefile.cbm build/win-cross/test-runner
+        BUILD_DIR=build/win-cross
         CC=x86_64-w64-mingw32-clang
         CXX=x86_64-w64-mingw32-clang++ &&
       echo '=== Running tests under Wine ===' &&
-      WINEDEBUG=-all wine64 build/c/test-runner.exe &&
+      WINEDEBUG=-all wine64 build/win-cross/test-runner.exe &&
       echo '=== Windows test: OK ==='
 
   # ── Smoke test (build + run smoke-test.sh) ──────────────────
@@ -98,8 +99,8 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        scripts/build.sh CC=gcc CXX=g++ &&
-        scripts/smoke-test.sh ./build/c/codebase-memory-mcp
+        scripts/build.sh CC=gcc CXX=g++ BUILD_DIR=build/linux-arm64 &&
+        scripts/smoke-test.sh ./build/linux-arm64/codebase-memory-mcp
 
   smoke-amd64:
     build:
@@ -111,8 +112,8 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        scripts/build.sh CC=gcc CXX=g++ &&
-        scripts/smoke-test.sh ./build/c/codebase-memory-mcp
+        scripts/build.sh CC=gcc CXX=g++ BUILD_DIR=build/linux-amd64 &&
+        scripts/smoke-test.sh ./build/linux-amd64/codebase-memory-mcp
 
   # ── Windows smoke (cross-compile + Wine) ──────────────────
   smoke-windows:
@@ -125,9 +126,9 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        scripts/build.sh CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ &&
-        mv build/c/codebase-memory-mcp build/c/codebase-memory-mcp.exe 2>/dev/null || true &&
-        WINEDEBUG=-all scripts/smoke-test.sh ./build/c/codebase-memory-mcp.exe
+        scripts/build.sh CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ BUILD_DIR=build/win-cross &&
+        mv build/win-cross/codebase-memory-mcp build/win-cross/codebase-memory-mcp.exe 2>/dev/null || true &&
+        WINEDEBUG=-all scripts/smoke-test.sh ./build/win-cross/codebase-memory-mcp.exe
 
   # ── Windows soak (cross-compile + Wine) ───────────────────
   soak-windows:
@@ -140,9 +141,9 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        scripts/build.sh CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ &&
-        mv build/c/codebase-memory-mcp build/c/codebase-memory-mcp.exe 2>/dev/null || true &&
-        CBM_DIAGNOSTICS=1 WINEDEBUG=-all scripts/soak-test.sh ./build/c/codebase-memory-mcp.exe 10
+        scripts/build.sh CC=x86_64-w64-mingw32-clang CXX=x86_64-w64-mingw32-clang++ BUILD_DIR=build/win-cross &&
+        mv build/win-cross/codebase-memory-mcp build/win-cross/codebase-memory-mcp.exe 2>/dev/null || true &&
+        CBM_DIAGNOSTICS=1 WINEDEBUG=-all scripts/soak-test.sh ./build/win-cross/codebase-memory-mcp.exe 10
 
   # ── Linux portable (Alpine musl static) ────────────────────
   test-portable:
@@ -153,7 +154,7 @@ services:
     volumes:
       - ..:/src
     entrypoint: ["bash", "scripts/test.sh"]
-    command: ["CC=gcc", "CXX=g++"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/alpine"]
 
   build-portable:
     build:
@@ -163,7 +164,7 @@ services:
     volumes:
       - ..:/src
     entrypoint: ["bash", "scripts/build.sh"]
-    command: ["CC=gcc", "CXX=g++", "STATIC=1"]
+    command: ["CC=gcc", "CXX=g++", "STATIC=1", "BUILD_DIR=build/alpine"]
 
   smoke-portable:
     build:
@@ -175,10 +176,10 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - |
-        scripts/build.sh CC=gcc CXX=g++ STATIC=1 &&
-        file build/c/codebase-memory-mcp | grep -q "statically linked" &&
+        scripts/build.sh CC=gcc CXX=g++ STATIC=1 BUILD_DIR=build/alpine &&
+        file build/alpine/codebase-memory-mcp | grep -q "statically linked" &&
         echo "=== Verified: statically linked ===" &&
-        scripts/smoke-test.sh ./build/c/codebase-memory-mcp
+        scripts/smoke-test.sh ./build/alpine/codebase-memory-mcp
 
   # ── Lint ────────────────────────────────────────────────────
   lint:
@@ -187,6 +188,7 @@ services:
       dockerfile: test-infrastructure/Dockerfile.lint
     volumes:
       - ..:/src
+    command: ["--ci", "CLANG_FORMAT=clang-format-20"]
 
 volumes:
   cbm-ccache-arm64:

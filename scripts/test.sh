@@ -38,13 +38,17 @@ done
 # shellcheck source=env.sh
 source "$ROOT/scripts/env.sh"
 
-# Forward CC/CXX and collect make-passthrough args
+# Forward CC/CXX and collect make-passthrough args. BUILD_DIR is honored for
+# the explicit target path below so containerized legs can build in their own
+# directory instead of clobbering the host's native build/c artifacts.
 MAKE_ARGS=""
+BUILD_DIR="build/c"
 for arg in "$@"; do
     case "$arg" in
         CC=*|CXX=*) export "${arg}" ;;
         --arch|--arch=*) ;; # already handled
         arm64|x86_64) ;; # already handled
+        BUILD_DIR=*) BUILD_DIR="${arg#BUILD_DIR=}"; MAKE_ARGS="$MAKE_ARGS $arg" ;;
         *=*) MAKE_ARGS="$MAKE_ARGS $arg" ;; # forward any VAR=VAL to make
     esac
 done
@@ -66,15 +70,15 @@ bash "$ROOT/tests/test_security_fuzz_harness.sh"
 # Verify compiler supports target arch
 verify_compiler "$CC"
 
-# Step 1: Clean
-scripts/clean.sh
+# Step 1: Clean (scoped to this leg's build directory)
+BUILD_DIR="$BUILD_DIR" scripts/clean.sh
 
 # Step 2 + 3: Build, then run every suite as parallel processes (identical
 # gate quality — see the ZERO-LOSS CONTRACT in scripts/run-tests-parallel.sh:
 # the suite set is enumerated from the runner itself and union-guarded, and
 # pass/fail/skip totals aggregate to the same numbers as the sequential run).
 # CBM_TEST_SEQUENTIAL=1 restores the single-process runner.
-make -j"$NPROC" -f Makefile.cbm build/c/test-runner $MAKE_ARGS
+make -j"$NPROC" -f Makefile.cbm "$BUILD_DIR/test-runner" $MAKE_ARGS
 if [ "${CBM_TEST_SEQUENTIAL:-0}" = "1" ]; then
     make -f Makefile.cbm test $MAKE_ARGS
 else

@@ -29,6 +29,8 @@
 #   ./test-infrastructure/run.sh windows      # Windows cross-compile only
 #   ./test-infrastructure/run.sh test         # Linux arm64 test only (no perf)
 #   ./test-infrastructure/run.sh perf         # Linux arm64 perf/incremental only
+#   ./test-infrastructure/run.sh tsan         # Linux arm64 ThreadSanitizer race gate
+#   ./test-infrastructure/run.sh tsan-amd64   # Linux amd64 ThreadSanitizer race gate
 #   ./test-infrastructure/run.sh build        # Linux arm64 build only
 #   ./test-infrastructure/run.sh lint         # clang-format + cppcheck
 #   ./test-infrastructure/run.sh shell        # debug shell
@@ -76,6 +78,8 @@ case "${1:-full}" in
         echo "=== Linux arm64: test + build ==="
         $COMPOSE run --rm -e CBM_SKIP_PERF=1 test
         $COMPOSE run --rm build
+        echo "=== Linux arm64: ThreadSanitizer (data-race gate) ==="
+        $COMPOSE run --rm test-tsan
         echo "=== Linux arm64: smoke test ==="
         $COMPOSE run --rm smoke
         echo "=== Linux portable: Alpine static build + smoke ==="
@@ -91,6 +95,19 @@ case "${1:-full}" in
     perf)
         echo "=== Linux arm64: perf/incremental tests ==="
         $COMPOSE run --rm test
+        ;;
+    tsan)
+        echo "=== Linux arm64: ThreadSanitizer (data-race gate) ==="
+        $COMPOSE run --rm test-tsan
+        ;;
+    tsan-amd64)
+        # NOTE: TSan's shadow memory is incompatible with x86_64-on-ARM
+        # translation (Rosetta/QEMU), so this FATALs ("unexpected memory
+        # mapping") on an Apple-Silicon host — it is a real-amd64-hardware /
+        # GitHub-CI gate, not a local-on-ARM one. ASan amd64 (test-amd64) runs
+        # fine under Rosetta; only TSan's mapping does not.
+        echo "=== Linux amd64: ThreadSanitizer (data-race gate; native amd64 only) ==="
+        $COMPOSE run --rm test-tsan-amd64
         ;;
     build)
         echo "=== Linux arm64: production build (-O2 -Werror) ==="
@@ -130,6 +147,10 @@ case "${1:-full}" in
         $COMPOSE run --rm -e CBM_SKIP_PERF=1 test
         $COMPOSE run --rm build
         $COMPOSE run --rm smoke
+        echo "=== Linux arm64: ThreadSanitizer (data-race gate) ==="
+        $COMPOSE run --rm test-tsan
+        # amd64 TSan is CI/native-amd64 only (Rosetta can't map TSan shadow);
+        # run it with `run.sh tsan-amd64` on real amd64. GitHub CI gates it.
         echo "=== Linux portable: Alpine static build + smoke ==="
         $COMPOSE run --rm smoke-portable
         echo "=== Linux amd64: test + build + smoke ==="
@@ -153,7 +174,7 @@ case "${1:-full}" in
         $COMPOSE run --rm --entrypoint bash test-portable
         ;;
     *)
-        echo "Usage: $0 {full|test|perf|build|smoke|portable|portable-test|windows|smoke-windows|soak-windows|amd64|all|lint|shell|shell-alpine}"
+        echo "Usage: $0 {full|test|perf|tsan|tsan-amd64|build|smoke|portable|portable-test|windows|smoke-windows|soak-windows|amd64|all|lint|shell|shell-alpine}"
         exit 1
         ;;
 esac

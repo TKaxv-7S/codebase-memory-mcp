@@ -716,7 +716,29 @@ test-repro: $(BUILD_DIR)/test-repro-runner
 
 # ── TSan full test ───────────────────────────────────────────────
 
-TEST_TSAN_SUITES ?= mem slab_alloc parallel
+# Every threaded production surface that runs clean AND stable under TSan:
+# allocator concurrency (mem, slab_alloc), the parallel extraction worker pool
+# (parallel, worker_pool, pipeline), the filesystem watcher (watcher), the
+# embedded HTTP server (httpd), diagnostics sampling (diagnostics), the MCP
+# server + mutation guard (mcp, mcp_mutation_guard), subprocess supervision
+# (subprocess), and the runnable daemon-coordination paths (daemon,
+# daemon_application). Was `mem slab_alloc parallel` — a keyhole that ran TSan
+# over no real threaded production code.
+#
+# Deliberately EXCLUDED (documented, not forgotten):
+#   daemon_runtime   — deadlocks under TSan: it forks after going
+#                      multi-threaded and the child re-enters the runtime, a
+#                      combination TSan's runtime does not support (hangs).
+#   daemon_ipc       — a TEST-harness data race (a helper thread writes a
+#                      main-thread stack slot without synchronization,
+#                      test_daemon_ipc.c:2088); production IPC is not implicated.
+#   daemon_frontend  — TEST-harness thread leaks (fixture threads left unjoined,
+#                      test_daemon_frontend.c:698) plus a fork-under-TSan fixture
+#                      failure. Test-quality work, tracked separately.
+# Re-enabling these three needs test-harness synchronization + a TSan-fork
+# strategy; it is out of scope for the current sanitizer-coverage pass.
+TEST_TSAN_SUITES ?= mem slab_alloc parallel worker_pool watcher httpd pipeline \
+                    diagnostics mcp mcp_mutation_guard subprocess daemon daemon_application
 TSAN_OPTIONS ?= halt_on_error=1
 
 $(BUILD_DIR)/test-runner-tsan: $(ALL_TEST_SRCS) $(PROD_SRCS) $(EXTRACTION_SRCS) $(AC_LZ4_SRCS) $(ZSTD_SRCS) $(SQLITE_WRITER_SRC) $(OBJS_VENDORED_TSAN) | $(BUILD_DIR)

@@ -115,31 +115,60 @@ jobs:
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
 
+  # ThreadSanitizer data-race gate. The threaded production surfaces (watcher,
+  # subprocess, httpd, pipeline, mcp, worker pool, diagnostics, the runnable
+  # daemon-coordination paths) plus allocator concurrency all run under TSan
+  # here — see TEST_TSAN_SUITES in Makefile.cbm. Runs on both Linux
+  # architectures AND native ARM64 macOS: the threading code is shared, so a
+  # race is usually caught on all three, but scheduler differences mean each
+  # platform can surface a race the others miss. Windows has no TSan runtime on
+  # any toolchain (documented irreducible gap); this shared-code coverage is
+  # its substitute.
   test-tsan:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cc: clang, cxx: clang++ }
+          - { os: ubuntu-24.04-arm, cc: clang, cxx: clang++ }
+          - { os: macos-14, cc: cc, cxx: c++ }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install deps (Ubuntu)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev ccache
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ccache
 
       - name: Compiler cache (content-verified)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tsan-${{ github.ref }}-${{ github.sha }}
+          key: ccache-tsan-${{ matrix.os }}-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
-            ccache-tsan-${{ github.ref }}-
+            ccache-tsan-${{ matrix.os }}-${{ github.ref }}-
 
       - name: ThreadSanitizer tests
-        # This job calls make directly (no env.sh), so route the compilers
-        # through ccache's Debian masquerade dir; update-ccache-symlinks in the
-        # ccache postinst has already linked the clang installed above.
+        # Calls make directly (no env.sh), so route the compilers through
+        # ccache's masquerade dir: /usr/lib/ccache on Debian, libexec under the
+        # Homebrew prefix on macOS. On Linux, reduce mmap ASLR entropy first:
+        # modern (esp. aarch64) kernels randomize high enough that TSan's
+        # shadow mapping aborts with "unexpected memory mapping" before any
+        # test runs. macOS TSan needs no such adjustment.
         run: |
-          export PATH=/usr/lib/ccache:$PATH
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            export PATH="$(brew --prefix ccache)/libexec:$PATH"
+          else
+            export PATH=/usr/lib/ccache:$PATH
+            sudo sysctl -w vm.mmap_rnd_bits=28 || true
+          fi
           export CCACHE_COMPILERCHECK=content
-          make -f Makefile.cbm test-tsan CC=clang CXX=clang++
+          make -f Makefile.cbm test-tsan CC=${{ matrix.cc }} CXX=${{ matrix.cxx }}
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 1500M
@@ -209,10 +238,15 @@ jobs:
         shell: msys2 {0}
         # AddressSanitizer is unavailable on native ARM64 Windows (LLVM ships no
         # libclang_rt.asan for aarch64-w64-windows-gnu) and cannot intercept the
-        # system DLLs under x86-64 emulation either, so windows-11-arm runs the
-        # native ARM64 build with SANITIZE= (no sanitizer) — still a real
-        # functional gate. ASan/UBSan coverage comes from the other 9 legs,
-        # including native-ARM Linux/macOS. x86-64 Windows keeps full sanitizers.
+        # system DLLs under x86-64 emulation either. Instead of running the
+        # ARM64 leg unsanitized, it runs UBSan in TRAP mode: -fsanitize-trap
+        # needs no runtime library (the very thing aarch64-w64-windows-gnu
+        # lacks), so it instruments natively and turns any undefined behavior
+        # into an illegal-instruction trap; -fstack-protector-strong adds
+        # stack-smash coverage the heap tools miss. To see WHICH check fired,
+        # reproduce under the emulated x86_64 UBSan (win.sh ubsan-build), which
+        # carries the full message. x86-64 Windows keeps full ASan+UBSan; the
+        # other native-ARM legs (Linux/macOS) carry ASan+LSan+TSan.
         run: |
           # Native tests resolve temp via TEMP/TMP (cbm_tmpdir); shell tools use
           # TMPDIR. Route both through the protected root created above so no
@@ -220,7 +254,7 @@ jobs:
           export TEMP="$(cygpath -m "$CBM_CI_TEMP_ROOT")"
           export TMP="$TEMP"
           export TMPDIR="$(cygpath -u "$CBM_CI_TEMP_ROOT")"
-          scripts/test.sh CC=clang CXX=clang++ ${{ matrix.os == 'windows-11-arm' && 'SANITIZE=' || '' }}
+          scripts/test.sh CC=clang CXX=clang++ ${{ matrix.os == 'windows-11-arm' && 'SANITIZE=-fsanitize=undefined -fsanitize-trap=undefined -fstack-protector-strong -fno-omit-frame-pointer' || '' }}
         env:
           CBM_SKIP_PERF: ${{ inputs.skip_perf && '1' || '' }}
           CCACHE_DIR: ${{ github.workspace }}/.ccache

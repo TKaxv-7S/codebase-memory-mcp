@@ -39,6 +39,46 @@ services:
       CCACHE_MAXSIZE: 1500M
     command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-amd64"]
 
+  # ── ThreadSanitizer (data-race gate) ───────────────────────────
+  # Overrides the default test.sh entrypoint to build + run the widened TSan
+  # suite set. /usr/lib/ccache is first on PATH in the image, so CC=gcc is
+  # ccache-masqueraded automatically (same as the ASan legs).
+  test-tsan:
+    build:
+      context: ..
+      dockerfile: test-infrastructure/Dockerfile
+    platform: linux/arm64
+    volumes:
+      - ..:/src
+      - cbm-ccache-arm64:/root/.ccache
+    environment:
+      CCACHE_DIR: /root/.ccache
+      CCACHE_MAXSIZE: 1500M
+    # TSan's shadow memory needs a predictable address space; modern aarch64
+    # kernels' high-entropy mmap ASLR makes its runtime abort with "unexpected
+    # memory mapping" before any test runs. setarch -R (ADDR_NO_RANDOMIZE)
+    # fixes it, but the personality() syscall it uses is blocked by the default
+    # seccomp profile — unconfined is safe here (the container runs only our own
+    # test code). The no-randomize personality inherits to the make child.
+    security_opt: ["seccomp=unconfined"]
+    entrypoint: ["setarch", "-R", "make", "-f", "Makefile.cbm", "test-tsan"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-arm64-tsan"]
+
+  test-tsan-amd64:
+    build:
+      context: ..
+      dockerfile: test-infrastructure/Dockerfile
+    platform: linux/amd64
+    volumes:
+      - ..:/src
+      - cbm-ccache-amd64:/root/.ccache
+    environment:
+      CCACHE_DIR: /root/.ccache
+      CCACHE_MAXSIZE: 1500M
+    security_opt: ["seccomp=unconfined"]
+    entrypoint: ["setarch", "-R", "make", "-f", "Makefile.cbm", "test-tsan"]
+    command: ["CC=gcc", "CXX=g++", "BUILD_DIR=build/linux-amd64-tsan"]
+
   # ── Linux production build (-O2 -Werror) ───────────────────
   build:
     build:

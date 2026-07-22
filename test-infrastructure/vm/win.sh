@@ -17,6 +17,7 @@
 #   win.sh push-file <local> <vm>  # scp one file into the VM (WIP iteration)
 #   win.sh test-par                # full suite, parallel on all VM cores
 #   win.sh ubsan-build|ubsan-test  # UBSan at CI's x86_64 arch (emulated; works)
+#   win.sh trap-ubsan-build|-test  # NATIVE ARM64 UBSan (trap mode, no runtime)
 #   win.sh pageheap on|off         # OS heap verification for native runs
 set -euo pipefail
 
@@ -152,6 +153,24 @@ ubsan-build)
 ubsan-test)
     [ $# -ge 1 ] || { echo "usage: win.sh ubsan-test <suite...>" >&2; exit 2; }
     vm clang64 "cd /c/cbm && ./build/c/test-runner $* 2>&1 | tail -40"
+    ;;
+trap-ubsan-build)
+    # NATIVE ARM64 UBSan via trap mode. -fsanitize-trap=undefined needs NO
+    # runtime library (which is exactly what aarch64-w64-windows-gnu lacks), so
+    # unlike ASan this instruments and runs on native ARM64: a UB hit becomes a
+    # bare illegal-instruction trap (SIGILL) instead of a diagnostic. Paired
+    # with -fstack-protector-strong for stack-smash coverage the heap tools
+    # (PageHeap) miss. This is the native-arch UBSan gate; to see WHICH check
+    # fired, reproduce under the emulated `win.sh ubsan-build`/`ubsan-test`,
+    # which carries the full runtime + message. BUILD_DIR isolated so it never
+    # clobbers the plain test-runner.
+    vm clangarm64 "cd /c/cbm && make -j${JOBS} -f Makefile.cbm CC='ccache clang' CXX='ccache clang++' SANITIZE='-fsanitize=undefined -fsanitize-trap=undefined -fstack-protector-strong -fno-omit-frame-pointer' BUILD_DIR=build/trap-ubsan build/trap-ubsan/test-runner > /tmp/win-trap-ubsan-build.log 2>&1 && echo TRAP_UBSAN_BUILD_OK || (echo TRAP_UBSAN_BUILD_FAIL; tail -20 /tmp/win-trap-ubsan-build.log; exit 1)"
+    ;;
+trap-ubsan-test)
+    [ $# -ge 1 ] || { echo "usage: win.sh trap-ubsan-test <suite...>" >&2; exit 2; }
+    # A UB trap crashes the runner with SIGILL (exit 132); the harness reports
+    # the failing suite so the emulated diagnosis loop can name the check.
+    vm clangarm64 "cd /c/cbm && ./build/trap-ubsan/test-runner $* 2>&1 | tail -40"
     ;;
 pageheap)
     # OS-level heap verification (page-granular overflow/UAF detection) for the

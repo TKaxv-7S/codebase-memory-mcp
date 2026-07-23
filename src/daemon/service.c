@@ -856,12 +856,26 @@ static bool windows_private_file_prepare(const char *directory, const char *base
      * to the ~16 ms timer granularity, and a permanently obstructed path
      * (e.g. a directory squatting on it) must fail fast — a rejected client
      * is waiting behind this on the hello path with its own timeout. */
-    ULONGLONG deadline = GetTickCount64() + 250;
+    ULONGLONG obstruction_deadline = GetTickCount64() + 250;
+    /* Genuine share collisions get a wider budget than obstruction: with
+     * many concurrent appenders on a loaded, sanitized CI runner the
+     * last-in-line writer can legitimately spend more than 250 ms behind
+     * its peers' brief exclusive windows, and the no-drop contract for
+     * conflict events outranks latency there — while a permanently
+     * obstructed path (a directory squatting on the name) still fails
+     * inside 250 ms, because a rejected client is waiting behind this on
+     * the hello path with its own timeout. */
+    ULONGLONG contention_deadline = GetTickCount64() + 2000;
     for (;;) {
+        SetLastError(ERROR_SUCCESS);
         FILE *file = cbm_daemon_ipc_private_log_open(directory, base, SIZE_MAX);
         if (file) {
             return fclose(file) == 0;
         }
+        DWORD open_error = GetLastError();
+        bool transient_collision =
+            open_error == ERROR_SHARING_VIOLATION || open_error == ERROR_LOCK_VIOLATION;
+        ULONGLONG deadline = transient_collision ? contention_deadline : obstruction_deadline;
         if (GetTickCount64() >= deadline) {
             return false;
         }
